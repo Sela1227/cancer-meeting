@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import React from "react";
 import { api } from "./api.js";
 import { C, F } from "./theme.js";
 import { VERSION } from "./lib/version.js";
@@ -56,17 +57,21 @@ const TABS = [
 
 // Settings Modal
 const SettingsModal = ({ onClose, onReload }) => {
-  const [msg, setMsg]       = useState("");
+  const [msg, setMsg]         = useState("");
+  const [msgType, setMsgType] = useState("ok"); // ok | error
   const [loading, setLoading] = useState("");
+  const fileRef = useRef();
+
+  const showMsg = (text, type="ok") => { setMsg(text); setMsgType(type); };
 
   const loadDemo = async () => {
     setLoading("load");
     try {
       const res = await fetch("/api/demo/load", { method:"POST" });
       const data = await res.json();
-      setMsg(data.message + "，頁面即將刷新...");
+      showMsg(data.message + "，頁面即將刷新...");
       setTimeout(() => window.location.reload(), 1500);
-    } catch(e) { setMsg("載入失敗：" + e.message); setLoading(""); }
+    } catch(e) { showMsg("載入失敗：" + e.message, "error"); setLoading(""); }
   };
 
   const clearDemo = async () => {
@@ -75,67 +80,134 @@ const SettingsModal = ({ onClose, onReload }) => {
     try {
       const res = await fetch("/api/demo/clear", { method:"DELETE" });
       const data = await res.json();
-      setMsg(data.message + "，頁面即將刷新...");
+      showMsg(data.message + "，頁面即將刷新...");
       setTimeout(() => window.location.reload(), 1500);
-    } catch(e) { setMsg("清除失敗：" + e.message); setLoading(""); }
+    } catch(e) { showMsg("清除失敗：" + e.message, "error"); setLoading(""); }
+  };
+
+  const exportBackup = async () => {
+    setLoading("export");
+    try {
+      const res = await fetch("/api/backup/export");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `癌症醫院備份_${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showMsg("備份匯出成功，請儲存 JSON 檔案");
+    } catch(e) { showMsg("匯出失敗：" + e.message, "error"); }
+    finally { setLoading(""); }
+  };
+
+  const importBackup = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!window.confirm(`確定要匯入「${file.name}」？現有所有資料將被覆蓋。`)) {
+      e.target.value = ""; return;
+    }
+    setLoading("import");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/backup/import", { method:"POST", body:form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "匯入失敗");
+      showMsg(data.message + "，頁面即將刷新...");
+      setTimeout(() => window.location.reload(), 1500);
+    } catch(e) { showMsg("匯入失敗：" + e.message, "error"); setLoading(""); }
+    e.target.value = "";
+  };
+
+  const Section = ({ title, children }) => (
+    <div style={{ background:C.cardAlt, borderRadius:14, padding:20, marginBottom:14 }}>
+      <div style={{ fontSize:12, fontWeight:800, color:C.accentMid, fontFamily:F,
+        letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:12 }}>{title}</div>
+      {children}
+    </div>
+  );
+
+  const Btn2 = ({ onClick, children, variant="primary", disabled }) => {
+    const styles = {
+      primary:   { background:C.accent,  color:"#fff",    border:"none" },
+      outline:   { background:"transparent", color:C.accent,  border:`1.5px solid ${C.accent}` },
+      danger:    { background:"transparent", color:C.danger,  border:`1.5px solid ${C.danger}` },
+      secondary: { background:"transparent", color:C.muted,   border:`1px solid ${C.border}` },
+    };
+    return (
+      <button onClick={onClick} disabled={disabled} style={{
+        ...styles[variant], flex:1, padding:"11px 8px", borderRadius:10,
+        fontSize:13, fontWeight:700, fontFamily:F, cursor:disabled?"not-allowed":"pointer",
+        opacity:disabled?0.6:1,
+      }}>{children}</button>
+    );
   };
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:400,
       display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-      <div style={{ background:C.card, borderRadius:20, padding:32, width:"100%", maxWidth:440,
-        boxShadow:"0 20px 60px rgba(0,0,0,0.2)" }}>
+      <div style={{ background:C.card, borderRadius:20, padding:28, width:"100%", maxWidth:460,
+        maxHeight:"90vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.2)" }}>
 
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
           <div style={{ fontSize:20, fontWeight:900, color:C.text, fontFamily:F }}>系統設定</div>
           <button onClick={onClose} style={{ background:"none", border:"none", fontSize:24,
             cursor:"pointer", color:C.muted, lineHeight:1 }}>×</button>
         </div>
 
-        <div style={{ background:C.cardAlt, borderRadius:14, padding:20, marginBottom:16 }}>
-          <div style={{ fontSize:13, fontWeight:800, color:C.accentMid, fontFamily:F,
-            letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:8 }}>Demo 資料</div>
-          <div style={{ fontSize:13, color:C.muted, fontFamily:F, marginBottom:16, lineHeight:1.6 }}>
-            載入預設示範資料，包含 3 次會議、6 個單位、8 位人員、15 件任務（含逾期、卡關、完成等各種狀態），可完整體驗所有功能。
+        {/* 資料備份 */}
+        <Section title="資料備份">
+          <div style={{ fontSize:12, color:C.muted, fontFamily:F, marginBottom:12, lineHeight:1.6 }}>
+            將所有資料（會議、單位、人員、任務、留言）匯出為 JSON 檔案備份，或從備份檔案還原。
           </div>
-          <div style={{ display:"flex", gap:10 }}>
-            <button onClick={loadDemo} disabled={!!loading} style={{
-              flex:1, background:C.accent, color:"#fff", border:"none",
-              padding:"12px", borderRadius:10, fontSize:14, fontWeight:700,
-              fontFamily:F, cursor:"pointer", opacity:loading?"0.6":"1",
-            }}>
-              {loading==="load" ? "載入中..." : "載入 Demo 資料"}
-            </button>
-            <button onClick={clearDemo} disabled={!!loading} style={{
-              flex:1, background:"transparent", color:C.danger,
-              border:`1.5px solid ${C.danger}`, padding:"12px", borderRadius:10,
-              fontSize:14, fontWeight:700, fontFamily:F, cursor:"pointer",
-              opacity:loading?"0.6":"1",
-            }}>
-              {loading==="clear" ? "清除中..." : "清除所有資料"}
-            </button>
+          <div style={{ display:"flex", gap:8 }}>
+            <Btn2 onClick={exportBackup} disabled={!!loading} variant="primary">
+              {loading==="export" ? "匯出中..." : "⬇ 匯出備份"}
+            </Btn2>
+            <Btn2 onClick={()=>fileRef.current?.click()} disabled={!!loading} variant="outline">
+              {loading==="import" ? "匯入中..." : "⬆ 匯入備份"}
+            </Btn2>
           </div>
-        </div>
+          <input ref={fileRef} type="file" accept=".json" onChange={importBackup}
+            style={{ display:"none" }} />
+        </Section>
+
+        {/* Demo 資料 */}
+        <Section title="Demo 資料">
+          <div style={{ fontSize:12, color:C.muted, fontFamily:F, marginBottom:12, lineHeight:1.6 }}>
+            載入預設示範資料，或清除所有資料重新開始。
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <Btn2 onClick={loadDemo} disabled={!!loading} variant="primary">
+              {loading==="load" ? "載入中..." : "載入 Demo"}
+            </Btn2>
+            <Btn2 onClick={clearDemo} disabled={!!loading} variant="danger">
+              {loading==="clear" ? "清除中..." : "清除所有"}
+            </Btn2>
+          </div>
+        </Section>
 
         {msg && (
-          <div style={{ background:C.accentLight, borderRadius:10, padding:"12px 16px",
-            fontSize:14, color:C.accent, fontFamily:F, fontWeight:600 }}>
+          <div style={{ background:msgType==="error"?C.dangerLight:C.accentLight,
+            borderRadius:10, padding:"12px 16px", marginBottom:14,
+            fontSize:13, color:msgType==="error"?C.danger:C.accent, fontFamily:F, fontWeight:600 }}>
             {msg}
           </div>
         )}
 
-        <div style={{ marginTop:20, paddingTop:16, borderTop:`1px solid ${C.border}`,
+        <div style={{ paddingTop:14, borderTop:`1px solid ${C.border}`,
           display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <SelaLogo size={28}/>
+            <SelaLogo size={26}/>
             <div>
-              <div style={{ fontSize:12, fontWeight:800, color:C.accent, fontFamily:F }}>Powered by SELA</div>
+              <div style={{ fontSize:11, fontWeight:800, color:C.accent, fontFamily:F }}>Powered by SELA</div>
               <div style={{ fontSize:10, color:C.muted, fontFamily:F }}>{VERSION}</div>
             </div>
           </div>
           <button onClick={onClose} style={{
             background:"none", border:`1px solid ${C.border}`,
-            color:C.muted, padding:"8px 18px", borderRadius:8,
+            color:C.muted, padding:"7px 16px", borderRadius:8,
             fontSize:13, fontWeight:600, fontFamily:F, cursor:"pointer",
           }}>關閉</button>
         </div>

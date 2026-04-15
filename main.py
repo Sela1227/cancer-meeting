@@ -554,6 +554,187 @@ def weekly_report(db: Session = Depends(get_db)):
     return StreamingResponse(buf,media_type="application/pdf",
         headers={"Content-Disposition":f"attachment; filename*=UTF-8''{filename.encode().hex()}"})
 
+# ── Backup Export / Import ────────────────────────────────────────────────────
+from fastapi.responses import JSONResponse
+from fastapi import UploadFile, File
+import json as json_lib
+
+@app.get("/api/backup/export")
+def export_backup(db: Session = Depends(get_db)):
+    """匯出所有資料為 JSON"""
+    meetings = db.query(Meeting).all()
+    units    = db.query(Unit).all()
+    members  = db.query(Member).all()
+    tasks    = db.query(Task).all()
+    comments = db.query(Comment).all()
+
+    data = {
+        "version": "1.0",
+        "exported_at": str(date.today()),
+        "meetings": [{"id":m.id,"title":m.title,"date":str(m.date),"session_no":m.session_no} for m in meetings],
+        "units":    [{"id":u.id,"name":u.name,"headcount":u.headcount,"available":u.available,"note":u.note} for u in units],
+        "members":  [{"id":m.id,"name":m.name,"email":m.email,"unit_id":m.unit_id,
+                      "seniority":m.seniority,"role_type":m.role_type} for m in members],
+        "tasks":    [{"id":t.id,"title":t.title,"description":t.description,
+                      "meeting_id":t.meeting_id,"unit_id":t.unit_id,
+                      "owner_id":t.owner_id,"assistant_id":t.assistant_id,
+                      "due_date":str(t.due_date) if t.due_date else None,
+                      "priority":t.priority.value if t.priority else None,
+                      "status":t.status.value if t.status else None,
+                      "blocked_reason":t.blocked_reason,
+                      "manpower_needed":t.manpower_needed,
+                      "manpower_current":t.manpower_current} for t in tasks],
+        "comments": [{"id":c.id,"task_id":c.task_id,"author_id":c.author_id,
+                      "content":c.content,"created_at":str(c.created_at)} for c in comments],
+    }
+    filename = f"癌症醫院備份_{date.today()}.json"
+    return JSONResponse(content=data, headers={
+        "Content-Disposition": f"attachment; filename*=UTF-8''{filename.encode().hex()}"
+    })
+
+@app.post("/api/backup/import")
+async def import_backup(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """匯入備份 JSON，覆蓋現有資料"""
+    try:
+        raw = await file.read()
+        data = json_lib.loads(raw)
+    except Exception as e:
+        raise HTTPException(400, f"JSON 解析失敗：{e}")
+
+    from datetime import datetime
+    status_map   = {v.value:v for v in StatusEnum}
+    priority_map = {v.value:v for v in PriorityEnum}
+
+    try:
+        # 清空
+        db.query(Comment).delete()
+        db.query(Task).delete()
+        db.query(Member).delete()
+        db.query(Unit).delete()
+        db.query(Meeting).delete()
+        db.commit()
+
+        # 建立 id 對照表（舊 id → 新物件）
+        meet_map, unit_map, mem_map = {}, {}, {}
+
+        for m in data.get("meetings", []):
+            obj = Meeting(title=m["title"], session_no=m["session_no"],
+                          date=datetime.strptime(m["date"], "%Y-%m-%d").date())
+            db.add(obj); db.flush()
+            meet_map[m["id"]] = obj.id
+
+        for u in data.get("units", []):
+            obj = Unit(name=u["name"], headcount=u.get("headcount",0),
+                       available=u.get("available",0), note=u.get("note",""))
+            db.add(obj); db.flush()
+            unit_map[u["id"]] = obj.id
+
+        for m in data.get("members", []):
+            obj = Member(name=m["name"], email=m.get("email"),
+                         unit_id=unit_map.get(m.get("unit_id")),
+                         seniority=m.get("seniority",0), role_type=m.get("role_type",""))
+            db.add(obj); db.flush()
+            mem_map[m["id"]] = obj.id
+
+        for t in data.get("tasks", []):
+            due = None
+            if t.get("due_date") and t["due_date"] != "None":
+                try: due = datetime.strptime(t["due_date"], "%Y-%m-%d").date()
+                except: pass
+            obj = Task(
+                title=t["title"], description=t.get("description",""),
+                meeting_id=meet_map.get(t.get("meeting_id")),
+                unit_id=unit_map.get(t.get("unit_id")),
+                owner_id=mem_map.get(t.get("owner_id")),
+                assistant_id=mem_map.get(t.get("assistant_id")),
+                due_date=due,
+                priority=priority_map.get(t.get("priority"), PriorityEnum.medium),
+                status=status_map.get(t.get("status"), StatusEnum.not_started),
+                blocked_reason=t.get("blocked_reason",""),
+                manpower_needed=t.get("manpower_needed",0),
+                manpower_current=t.get("manpower_current",0),
+            )
+            db.add(obj); db.flush()
+            # comments 用舊 task id 對照
+            task_map_entry = (t["id"], obj.id)
+            mem_map[f"task_{t['id']}"] = obj.id  # 借用 mem_map 存 task id 對照
+
+        # 建 task id 對照
+        task_id_map = {}
+        all_tasks_after = db.query(Task).all()
+        # 用 title 粗略對照（備份匯入後 id 重新分配）
+        # 更正確：在上面 flush 後直接記錄
+        # 重新做：在 task 迴圈中記錄
+        db.rollback()
+
+        # ── 重新做，正確記錄 task id ──
+        db.query(Comment).delete()
+        db.query(Task).delete()
+        db.query(Member).delete()
+        db.query(Unit).delete()
+        db.query(Meeting).delete()
+        db.commit()
+
+        meet_map, unit_map, mem_map, task_map = {}, {}, {}, {}
+
+        for m in data.get("meetings", []):
+            obj = Meeting(title=m["title"], session_no=m["session_no"],
+                          date=datetime.strptime(m["date"], "%Y-%m-%d").date())
+            db.add(obj); db.flush(); meet_map[m["id"]] = obj.id
+
+        for u in data.get("units", []):
+            obj = Unit(name=u["name"], headcount=u.get("headcount",0),
+                       available=u.get("available",0), note=u.get("note",""))
+            db.add(obj); db.flush(); unit_map[u["id"]] = obj.id
+
+        for m in data.get("members", []):
+            obj = Member(name=m["name"], email=m.get("email"),
+                         unit_id=unit_map.get(m.get("unit_id")),
+                         seniority=m.get("seniority",0), role_type=m.get("role_type",""))
+            db.add(obj); db.flush(); mem_map[m["id"]] = obj.id
+
+        for t in data.get("tasks", []):
+            due = None
+            if t.get("due_date") and t["due_date"] not in (None, "None", "null"):
+                try: due = datetime.strptime(str(t["due_date"]), "%Y-%m-%d").date()
+                except: pass
+            obj = Task(
+                title=t["title"], description=t.get("description",""),
+                meeting_id=meet_map.get(t.get("meeting_id")),
+                unit_id=unit_map.get(t.get("unit_id")),
+                owner_id=mem_map.get(t.get("owner_id")),
+                assistant_id=mem_map.get(t.get("assistant_id")),
+                due_date=due,
+                priority=priority_map.get(t.get("priority"), PriorityEnum.medium),
+                status=status_map.get(t.get("status"), StatusEnum.not_started),
+                blocked_reason=t.get("blocked_reason",""),
+                manpower_needed=t.get("manpower_needed",0),
+                manpower_current=t.get("manpower_current",0),
+            )
+            db.add(obj); db.flush(); task_map[t["id"]] = obj.id
+
+        for c in data.get("comments", []):
+            new_task_id = task_map.get(c.get("task_id"))
+            if not new_task_id: continue
+            obj = Comment(task_id=new_task_id,
+                          author_id=mem_map.get(c.get("author_id")),
+                          content=c.get("content",""))
+            db.add(obj)
+
+        db.commit()
+        counts = {
+            "meetings": len(data.get("meetings",[])),
+            "units": len(data.get("units",[])),
+            "members": len(data.get("members",[])),
+            "tasks": len(data.get("tasks",[])),
+            "comments": len(data.get("comments",[])),
+        }
+        return {"ok": True, "message": f"備份匯入成功：{counts['tasks']} 件任務、{counts['members']} 位人員", "counts": counts}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"匯入失敗：{e}")
+
 # ── Manual notification trigger ───────────────────────────────────────────────
 @app.post("/api/notify/run")
 def run_notify():
