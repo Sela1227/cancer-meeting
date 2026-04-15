@@ -237,9 +237,13 @@ def unit_loads(db: Session = Depends(get_db)):
         completed = sum(1 for t in tasks if t.status == StatusEnum.done)
         overdue   = sum(1 for t in tasks if is_overdue(t))
         load      = min(100, total * 8 + overdue * 15)
+        # 人力從實際人員計算
+        all_members   = db.query(Member).filter(Member.unit_id == u.id).all()
+        headcount     = len(all_members)
+        available     = sum(1 for m in all_members if m.role_type == "臨床專責")
         result.append({
             "id": u.id, "name": u.name,
-            "headcount": u.headcount, "available": u.available,
+            "headcount": headcount, "available": available,
             "tasks": total, "completed": completed,
             "overdue": overdue, "load": load, "note": u.note,
         })
@@ -572,27 +576,35 @@ if os.path.exists("static"):
 # ── Demo Data ─────────────────────────────────────────────────────────────────
 
 DEMO_UNITS = [
-    {"name":"癌症防治中心",      "headcount":6, "available":4,"note":"統籌兩院癌症防治業務"},
-    {"name":"放腫科（彰濱）",    "headcount":5, "available":2,"note":"設備值班限制可用人力"},
-    {"name":"放腫科（彰秀）",    "headcount":5, "available":2,"note":""},
-    {"name":"血液腫瘤科（彰濱）","headcount":4, "available":2,"note":""},
-    {"name":"血液腫瘤科（彰秀）","headcount":4, "available":2,"note":""},
-    {"name":"一般外科（彰濱）",  "headcount":6, "available":2,"note":""},
-    {"name":"內科（彰秀）",      "headcount":8, "available":3,"note":"住院醫師輪訓中"},
-    {"name":"醫務管理組",        "headcount":4, "available":3,"note":"癌症醫院行政窗口"},
+    {"name":"癌症防治中心（彰秀）","headcount":0,"available":0,"note":"彰秀院區癌症防治業務統籌"},
+    {"name":"癌症防治中心（彰濱）","headcount":0,"available":0,"note":"彰濱院區癌症防治業務統籌"},
+    {"name":"放腫科（彰濱）",      "headcount":0,"available":0,"note":"設備值班限制可用人力"},
+    {"name":"放腫科（彰秀）",      "headcount":0,"available":0,"note":""},
+    {"name":"血液腫瘤科（彰濱）",  "headcount":0,"available":0,"note":""},
+    {"name":"血液腫瘤科（彰秀）",  "headcount":0,"available":0,"note":""},
+    {"name":"一般外科（彰濱）",    "headcount":0,"available":0,"note":""},
+    {"name":"內科（彰秀）",        "headcount":0,"available":0,"note":"住院醫師輪訓中"},
+    {"name":"醫務管理組",          "headcount":0,"available":0,"note":"癌症醫院行政窗口"},
 ]
 
 DEMO_MEMBERS = [
-    {"name":"劉大智","email":"liu@show.org.tw",   "unit":3,"seniority":10,"role_type":"臨床專責"},  # 彰濱血腫
-    {"name":"李芃逸","email":"lee_pf@show.org.tw","unit":2,"seniority":8, "role_type":"臨床專責"},  # 彰秀放腫
-    {"name":"李岳聰","email":"lee_yc@show.org.tw","unit":5,"seniority":6, "role_type":"臨床專責"},  # 彰濱一般外
-    {"name":"林伯儒","email":"lin@show.org.tw",   "unit":1,"seniority":9, "role_type":"臨床專責"},  # 彰濱放腫/癌症中心
-    {"name":"陳明志","email":"chen@show.org.tw",  "unit":6,"seniority":12,"role_type":"臨床專責"},  # 彰秀內科
-    {"name":"張景明","email":"chang@show.org.tw", "unit":4,"seniority":11,"role_type":"臨床專責"},  # 彰秀血腫/癌症中心
+    # 實際出席人員
+    {"name":"劉大智","email":"liu@show.org.tw",   "unit":4,"seniority":10,"role_type":"臨床專責"},  # 彰濱血腫
+    {"name":"李芃逸","email":"lee_pf@show.org.tw","unit":3,"seniority":8, "role_type":"臨床專責"},  # 彰秀放腫
+    {"name":"李岳聰","email":"lee_yc@show.org.tw","unit":6,"seniority":6, "role_type":"臨床專責"},  # 彰濱一般外
+    {"name":"林伯儒","email":"lin@show.org.tw",   "unit":2,"seniority":9, "role_type":"臨床專責"},  # 彰濱放腫
+    {"name":"陳明志","email":"chen@show.org.tw",  "unit":7,"seniority":12,"role_type":"臨床專責"},  # 彰秀內科
+    {"name":"張景明","email":"chang@show.org.tw", "unit":5,"seniority":11,"role_type":"臨床專責"},  # 彰秀血腫
     {"name":"吳雅媚","email":"wu@show.org.tw",    "unit":0,"seniority":7, "role_type":"行政兼任"},  # 彰秀癌症中心
-    {"name":"孔玲鈞","email":"kong@show.org.tw",  "unit":0,"seniority":5, "role_type":"行政兼任"},  # 彰濱癌症中心
-    {"name":"杜祐儀","email":"du@show.org.tw",    "unit":7,"seniority":5, "role_type":"行政兼任"},  # 彰秀經管/秘書
-    {"name":"王心怡","email":"wang@show.org.tw",  "unit":7,"seniority":3, "role_type":"行政兼任"},  # 彰秀經管
+    {"name":"孔玲鈞","email":"kong@show.org.tw",  "unit":1,"seniority":5, "role_type":"行政兼任"},  # 彰濱癌症中心
+    {"name":"杜祐儀","email":"du@show.org.tw",    "unit":8,"seniority":5, "role_type":"行政兼任"},  # 醫務管理組/秘書
+    {"name":"王心怡","email":"wang@show.org.tw",  "unit":8,"seniority":3, "role_type":"行政兼任"},  # 醫務管理組
+    # 測試人員
+    {"name":"測試人A","email":"testA@demo.com","unit":0,"seniority":5,"role_type":"臨床專責"},  # 彰秀癌症中心
+    {"name":"測試人B","email":"testB@demo.com","unit":1,"seniority":3,"role_type":"臨床專責"},  # 彰濱癌症中心
+    {"name":"測試人C","email":"testC@demo.com","unit":2,"seniority":8,"role_type":"臨床專責"},  # 放腫科彰濱
+    {"name":"測試人D","email":"testD@demo.com","unit":3,"seniority":6,"role_type":"臨床專責"},  # 放腫科彰秀
+    {"name":"測試人E","email":"testE@demo.com","unit":8,"seniority":2,"role_type":"行政兼任"},  # 醫務管理組
 ]
 
 DEMO_MEETINGS = [
@@ -603,23 +615,23 @@ DEMO_MEETINGS = [
 DEMO_TASKS = [
     # 第1次會議
     {"title":"各癌別疾病照護品質認證改善計畫","meeting":0,"unit":0,"owner":6,"priority":"高","status":"進行中","due_offset":3, "blocked_reason":"","manpower_needed":3,"manpower_current":2},
-    {"title":"放腫科收入業務分析報告",         "meeting":0,"unit":2,"owner":1,"priority":"高","status":"完成",  "due_offset":-60,"blocked_reason":"","manpower_needed":1,"manpower_current":1},
+    {"title":"放腫科收入業務分析報告",         "meeting":0,"unit":3,"owner":1,"priority":"高","status":"完成",  "due_offset":-60,"blocked_reason":"","manpower_needed":1,"manpower_current":1},
     {"title":"彰化兩院癌症新診斷人數統計",     "meeting":0,"unit":0,"owner":7,"priority":"中","status":"完成",  "due_offset":-55,"blocked_reason":"","manpower_needed":2,"manpower_current":2},
-    {"title":"品質指標遜於同儕項目改善計畫",   "meeting":0,"unit":6,"owner":4,"priority":"高","status":"卡關",  "due_offset":-5, "blocked_reason":"需各科提供2024實際數值，內科尚未完整回覆","manpower_needed":4,"manpower_current":2},
+    {"title":"品質指標遜於同儕項目改善計畫",   "meeting":0,"unit":7,"owner":4,"priority":"高","status":"卡關",  "due_offset":-5, "blocked_reason":"需各科提供2024實際數值，內科尚未完整回覆","manpower_needed":4,"manpower_current":2},
     {"title":"癌症防治策進計畫去年度執行報告", "meeting":0,"unit":0,"owner":6,"priority":"中","status":"完成",  "due_offset":-58,"blocked_reason":"","manpower_needed":2,"manpower_current":2},
-    {"title":"健康台灣深耕計畫執行追蹤",       "meeting":0,"unit":0,"owner":7,"priority":"中","status":"進行中","due_offset":7,  "blocked_reason":"","manpower_needed":2,"manpower_current":2},
+    {"title":"健康台灣深耕計畫執行追蹤",       "meeting":0,"unit":1,"owner":7,"priority":"中","status":"進行中","due_offset":7,  "blocked_reason":"","manpower_needed":2,"manpower_current":2},
     # 第2次會議（延期）
-    {"title":"會議運作調整方案研擬",           "meeting":1,"unit":7,"owner":8,"priority":"高","status":"進行中","due_offset":14, "blocked_reason":"","manpower_needed":2,"manpower_current":2},
-    {"title":"交辦任務期限管控機制建立",       "meeting":1,"unit":7,"owner":9,"priority":"高","status":"未開始","due_offset":30, "blocked_reason":"","manpower_needed":1,"manpower_current":0},
-    {"title":"議程精實化作業規範",             "meeting":1,"unit":7,"owner":8,"priority":"中","status":"未開始","due_offset":30, "blocked_reason":"","manpower_needed":1,"manpower_current":0},
-    {"title":"彰濱放腫科業務擴展規劃",         "meeting":1,"unit":1,"owner":3,"priority":"高","status":"進行中","due_offset":21, "blocked_reason":"","manpower_needed":2,"manpower_current":1},
+    {"title":"會議運作調整方案研擬",           "meeting":1,"unit":8,"owner":8,"priority":"高","status":"進行中","due_offset":14, "blocked_reason":"","manpower_needed":2,"manpower_current":2},
+    {"title":"交辦任務期限管控機制建立",       "meeting":1,"unit":8,"owner":9,"priority":"高","status":"未開始","due_offset":30, "blocked_reason":"","manpower_needed":1,"manpower_current":0},
+    {"title":"議程精實化作業規範",             "meeting":1,"unit":8,"owner":8,"priority":"中","status":"未開始","due_offset":30, "blocked_reason":"","manpower_needed":1,"manpower_current":0},
+    {"title":"彰濱放腫科業務擴展規劃",         "meeting":1,"unit":2,"owner":3,"priority":"高","status":"進行中","due_offset":21, "blocked_reason":"","manpower_needed":2,"manpower_current":1},
     {"title":"跨科轉介標準流程建立",           "meeting":1,"unit":0,"owner":6,"priority":"高","status":"進行中","due_offset":10, "blocked_reason":"","manpower_needed":3,"manpower_current":2},
-    {"title":"癌症個管師制度建立",             "meeting":1,"unit":0,"owner":5,"priority":"高","status":"卡關",  "due_offset":-2, "blocked_reason":"人力不足，需跨單位協調，候補人選尚未確認","manpower_needed":3,"manpower_current":1},
-    {"title":"5月份會議議程預備",             "meeting":1,"unit":7,"owner":8,"priority":"低","status":"未開始","due_offset":21, "blocked_reason":"","manpower_needed":1,"manpower_current":0},
-    {"title":"各單位人力盤點表彙整",           "meeting":1,"unit":7,"owner":9,"priority":"中","status":"進行中","due_offset":7,  "blocked_reason":"","manpower_needed":1,"manpower_current":1},
-    {"title":"血腫科臨床試驗執行追蹤",         "meeting":1,"unit":3,"owner":0,"priority":"中","status":"進行中","due_offset":14, "blocked_reason":"","manpower_needed":2,"manpower_current":2},
-    {"title":"MDT多專科會議標準化",           "meeting":1,"unit":0,"owner":5,"priority":"中","status":"未開始","due_offset":45, "blocked_reason":"","manpower_needed":2,"manpower_current":0},
-    {"title":"放腫科QCC品質改善計畫",         "meeting":1,"unit":1,"owner":3,"priority":"中","status":"進行中","due_offset":10, "blocked_reason":"","manpower_needed":2,"manpower_current":2},
+    {"title":"癌症個管師制度建立",             "meeting":1,"unit":1,"owner":5,"priority":"高","status":"卡關",  "due_offset":-2, "blocked_reason":"人力不足，需跨單位協調，候補人選尚未確認","manpower_needed":3,"manpower_current":1},
+    {"title":"5月份會議議程預備",             "meeting":1,"unit":8,"owner":8,"priority":"低","status":"未開始","due_offset":21, "blocked_reason":"","manpower_needed":1,"manpower_current":0},
+    {"title":"各單位人力盤點表彙整",           "meeting":1,"unit":8,"owner":9,"priority":"中","status":"進行中","due_offset":7,  "blocked_reason":"","manpower_needed":1,"manpower_current":1},
+    {"title":"血腫科臨床試驗執行追蹤",         "meeting":1,"unit":4,"owner":0,"priority":"中","status":"進行中","due_offset":14, "blocked_reason":"","manpower_needed":2,"manpower_current":2},
+    {"title":"MDT多專科會議標準化",           "meeting":1,"unit":0,"owner":10,"priority":"中","status":"未開始","due_offset":45, "blocked_reason":"","manpower_needed":2,"manpower_current":0},
+    {"title":"放腫科QCC品質改善計畫",         "meeting":1,"unit":2,"owner":3,"priority":"中","status":"進行中","due_offset":10, "blocked_reason":"","manpower_needed":2,"manpower_current":2},
 ]
 
 DEMO_COMMENTS = {
@@ -657,6 +669,15 @@ def _seed_demo(db):
         obj = Member(name=m["name"], email=m["email"], unit_id=units[m["unit"]].id,
                      seniority=m["seniority"], role_type=m["role_type"])
         db.add(obj); db.flush(); members.append(obj)
+
+    # 自動從人員數量計算 headcount，available = 臨床專責人數
+    from collections import Counter
+    unit_member_counts   = Counter(m["unit"] for m in DEMO_MEMBERS)
+    unit_available_counts = Counter(m["unit"] for m in DEMO_MEMBERS if m["role_type"] == "臨床專責")
+    for i, u_obj in enumerate(units):
+        u_obj.headcount = unit_member_counts.get(i, 0)
+        u_obj.available = unit_available_counts.get(i, 0)
+    db.flush()
 
     tasks = []
     status_map = {"完成": StatusEnum.done, "進行中": StatusEnum.in_progress,
