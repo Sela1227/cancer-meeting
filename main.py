@@ -399,9 +399,9 @@ def weekly_report(db: Session = Depends(get_db)):
             return None
         n = len(units_data)
         dh = max(n*28+40, 100)
-        d = Drawing(W*2.83, dh)  # 轉 pt
+        d = Drawing(W, dh)  # 轉 pt
         max_v = max((u["total"] for u in units_data), default=1)
-        BAR_W = W*2.83 - 160
+        BAR_W = W - 170
         for i,u in enumerate(units_data):
             y = dh - 30 - i*28
             # 底色軌道
