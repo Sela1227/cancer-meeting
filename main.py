@@ -249,17 +249,13 @@ def unit_loads(db: Session = Depends(get_db)):
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 
-FONT_PATH      = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
-FONT_PATH_BOLD = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
-
 def _register_fonts():
     from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     try:
-        pdfmetrics.getFont("WQY")
+        pdfmetrics.getFont("STSong-Light")
     except Exception:
-        pdfmetrics.registerFont(TTFont("WQY",     FONT_PATH))
-        pdfmetrics.registerFont(TTFont("WQY-Bold", FONT_PATH_BOLD))
+        pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
 
 @app.get("/api/report/weekly")
 def weekly_report(db: Session = Depends(get_db)):
@@ -273,8 +269,8 @@ def weekly_report(db: Session = Depends(get_db)):
     from reportlab.graphics import renderPDF
 
     _register_fonts()
-    CN     = "WQY"
-    CNB    = "WQY-Bold"
+    CN     = "STSong-Light"
+    CNB    = "STSong-Light"
     BROWN  = colors.HexColor("#6B4226")
     DARK   = colors.HexColor("#2E1F14")
     RED    = colors.HexColor("#8B2E2E")
