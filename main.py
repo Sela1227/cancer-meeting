@@ -585,26 +585,41 @@ DEMO_UNITS = [
     {"name":"一般外科（彰濱）",    "headcount":0,"available":0,"note":""},
     {"name":"內科（彰秀）",        "headcount":0,"available":0,"note":"住院醫師輪訓中"},
     {"name":"醫務管理組",          "headcount":0,"available":0,"note":"癌症醫院行政窗口"},
+    {"name":"護理部（彰秀）",      "headcount":0,"available":0,"note":"臨床排班影響可用人力"},
+    {"name":"護理部（彰濱）",      "headcount":0,"available":0,"note":""},
+    {"name":"病理科",              "headcount":0,"available":0,"note":"人員外借院本部"},
+    {"name":"影像科",              "headcount":0,"available":0,"note":""},
+    {"name":"社工科",              "headcount":0,"available":0,"note":""},
 ]
 
 DEMO_MEMBERS = [
-    # 實際出席人員
-    {"name":"劉大智","email":"liu@show.org.tw",   "unit":4,"seniority":10,"role_type":"臨床專責"},  # 彰濱血腫
-    {"name":"李芃逸","email":"lee_pf@show.org.tw","unit":3,"seniority":8, "role_type":"臨床專責"},  # 彰秀放腫
-    {"name":"李岳聰","email":"lee_yc@show.org.tw","unit":6,"seniority":6, "role_type":"臨床專責"},  # 彰濱一般外
-    {"name":"林伯儒","email":"lin@show.org.tw",   "unit":2,"seniority":9, "role_type":"臨床專責"},  # 彰濱放腫
-    {"name":"陳明志","email":"chen@show.org.tw",  "unit":7,"seniority":12,"role_type":"臨床專責"},  # 彰秀內科
-    {"name":"張景明","email":"chang@show.org.tw", "unit":5,"seniority":11,"role_type":"臨床專責"},  # 彰秀血腫
-    {"name":"吳雅媚","email":"wu@show.org.tw",    "unit":0,"seniority":7, "role_type":"行政兼任"},  # 彰秀癌症中心
-    {"name":"孔玲鈞","email":"kong@show.org.tw",  "unit":1,"seniority":5, "role_type":"行政兼任"},  # 彰濱癌症中心
-    {"name":"杜祐儀","email":"du@show.org.tw",    "unit":8,"seniority":5, "role_type":"行政兼任"},  # 醫務管理組/秘書
-    {"name":"王心怡","email":"wang@show.org.tw",  "unit":8,"seniority":3, "role_type":"行政兼任"},  # 醫務管理組
-    # 測試人員
-    {"name":"測試人A","email":"testA@demo.com","unit":0,"seniority":5,"role_type":"臨床專責"},  # 彰秀癌症中心
-    {"name":"測試人B","email":"testB@demo.com","unit":1,"seniority":3,"role_type":"臨床專責"},  # 彰濱癌症中心
-    {"name":"測試人C","email":"testC@demo.com","unit":2,"seniority":8,"role_type":"臨床專責"},  # 放腫科彰濱
-    {"name":"測試人D","email":"testD@demo.com","unit":3,"seniority":6,"role_type":"臨床專責"},  # 放腫科彰秀
-    {"name":"測試人E","email":"testE@demo.com","unit":8,"seniority":2,"role_type":"行政兼任"},  # 醫務管理組
+    # 實際出席人員（index 0-9）
+    {"name":"劉大智","email":"liu@show.org.tw",   "unit":4,"seniority":10,"role_type":"臨床專責"},
+    {"name":"李芃逸","email":"lee_pf@show.org.tw","unit":3,"seniority":8, "role_type":"臨床專責"},
+    {"name":"李岳聰","email":"lee_yc@show.org.tw","unit":6,"seniority":6, "role_type":"臨床專責"},
+    {"name":"林伯儒","email":"lin@show.org.tw",   "unit":2,"seniority":9, "role_type":"臨床專責"},
+    {"name":"陳明志","email":"chen@show.org.tw",  "unit":7,"seniority":12,"role_type":"臨床專責"},
+    {"name":"張景明","email":"chang@show.org.tw", "unit":5,"seniority":11,"role_type":"臨床專責"},
+    {"name":"吳雅媚","email":"wu@show.org.tw",    "unit":0,"seniority":7, "role_type":"行政兼任"},
+    {"name":"孔玲鈞","email":"kong@show.org.tw",  "unit":1,"seniority":5, "role_type":"行政兼任"},
+    {"name":"杜祐儀","email":"du@show.org.tw",    "unit":8,"seniority":5, "role_type":"行政兼任"},
+    {"name":"王心怡","email":"wang@show.org.tw",  "unit":8,"seniority":3, "role_type":"行政兼任"},
+    # 測試人員（index 10-24）
+    {"name":"測試人A","email":"testA@demo.com","unit":0, "seniority":5,"role_type":"臨床專責"},
+    {"name":"測試人B","email":"testB@demo.com","unit":1, "seniority":3,"role_type":"臨床專責"},
+    {"name":"測試人C","email":"testC@demo.com","unit":2, "seniority":8,"role_type":"臨床專責"},
+    {"name":"測試人D","email":"testD@demo.com","unit":3, "seniority":6,"role_type":"臨床專責"},
+    {"name":"測試人E","email":"testE@demo.com","unit":8, "seniority":2,"role_type":"行政兼任"},
+    {"name":"測試人F","email":"testF@demo.com","unit":9, "seniority":4,"role_type":"臨床專責"},
+    {"name":"測試人G","email":"testG@demo.com","unit":10,"seniority":3,"role_type":"臨床專責"},
+    {"name":"測試人H","email":"testH@demo.com","unit":11,"seniority":7,"role_type":"臨床專責"},
+    {"name":"測試人I","email":"testI@demo.com","unit":12,"seniority":5,"role_type":"臨床專責"},
+    {"name":"測試人J","email":"testJ@demo.com","unit":13,"seniority":2,"role_type":"行政兼任"},
+    {"name":"測試人K","email":"testK@demo.com","unit":4, "seniority":6,"role_type":"臨床專責"},
+    {"name":"測試人L","email":"testL@demo.com","unit":5, "seniority":4,"role_type":"臨床專責"},
+    {"name":"測試人M","email":"testM@demo.com","unit":6, "seniority":3,"role_type":"臨床專責"},
+    {"name":"測試人N","email":"testN@demo.com","unit":7, "seniority":9,"role_type":"臨床專責"},
+    {"name":"測試人O","email":"testO@demo.com","unit":9, "seniority":5,"role_type":"行政兼任"},
 ]
 
 DEMO_MEETINGS = [

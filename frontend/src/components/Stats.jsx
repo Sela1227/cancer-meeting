@@ -54,7 +54,9 @@ const StatNum = ({ value, label, color }) => (
 // ── 主元件 ───────────────────────────────────────────────────────────────────
 
 export default function Stats({ tasks, members, meetings, unitLoads, monthly }) {
-  const [view, setView] = useState("meeting"); // meeting | person | unit
+  const [view, setView]       = useState("meeting");
+  const [range, setRange]     = useState("all");   // all | year | quarter | month | custom
+  const [customYear, setCustomYear] = useState(new Date().getFullYear());
 
   const tabs = [
     { id: "meeting", label: "會議效能" },
@@ -62,39 +64,95 @@ export default function Stats({ tasks, members, meetings, unitLoads, monthly }) 
     { id: "unit",    label: "單位效率" },
   ];
 
+  const rangeBtns = [
+    { id: "all",     label: "全部" },
+    { id: "year",    label: "本年" },
+    { id: "quarter", label: "本季" },
+    { id: "month",   label: "本月" },
+    { id: "custom",  label: "指定年" },
+  ];
+
+  // Filter tasks by time range based on created_at
+  const now  = new Date();
+  const yr   = now.getFullYear();
+  const mo   = now.getMonth();
+  const qStart = Math.floor(mo / 3) * 3;
+
+  const filteredTasks = tasks.filter(t => {
+    if (range === "all") return true;
+    const d = t.created_at ? new Date(t.created_at) : null;
+    if (!d) return range === "all";
+    if (range === "year")    return d.getFullYear() === yr;
+    if (range === "quarter") return d.getFullYear() === yr && d.getMonth() >= qStart && d.getMonth() < qStart+3;
+    if (range === "month")   return d.getFullYear() === yr && d.getMonth() === mo;
+    if (range === "custom")  return d.getFullYear() === customYear;
+    return true;
+  });
+
+  const currentYear = yr;
+  const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-      {/* 頁面說明 + tab 切換 */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 900, color: C.text, fontFamily: F }}>深度統計分析</div>
-          <div style={{ fontSize: 12, color: C.muted, fontFamily: F, marginTop: 2 }}>
-            從會議效能、個人貢獻、單位效率三個維度評估執行力
+      {/* 頁面說明 + 雙列控制 */}
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: C.text, fontFamily: F }}>深度統計分析</div>
+            <div style={{ fontSize: 12, color: C.muted, fontFamily: F, marginTop: 2 }}>
+              從會議效能、個人貢獻、單位效率三個維度評估執行力
+            </div>
+          </div>
+          {/* 維度 tab */}
+          <div style={{ display: "flex", background: C.cardAlt, borderRadius: 12, padding: 4, gap: 2 }}>
+            {tabs.map(t => (
+              <button key={t.id} onClick={() => setView(t.id)} style={{
+                background: view === t.id ? C.accent : "none",
+                color: view === t.id ? "#fff" : C.muted,
+                border: "none", cursor: "pointer",
+                padding: "8px 14px", borderRadius: 9,
+                fontSize: 14, fontWeight: view === t.id ? 800 : 500, fontFamily: F,
+                transition: "all 0.15s",
+              }}>{t.label}</button>
+            ))}
           </div>
         </div>
-        <div style={{ display: "flex", background: C.cardAlt, borderRadius: 12, padding: 4, gap: 2 }}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setView(t.id)} style={{
-              background: view === t.id ? C.accent : "none",
-              color: view === t.id ? "#fff" : C.muted,
-              border: "none", cursor: "pointer",
-              padding: "8px 14px", borderRadius: 9,
-              fontSize: 14, fontWeight: view === t.id ? 800 : 500, fontFamily: F,
-              transition: "all 0.15s",
-            }}>{t.label}</button>
+
+        {/* 時間區間列 */}
+        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+          <span style={{ fontSize:12, color:C.muted, fontFamily:F, fontWeight:600 }}>時間區間：</span>
+          {rangeBtns.map(b => (
+            <button key={b.id} onClick={()=>setRange(b.id)} style={{
+              padding:"6px 14px", borderRadius:20, border:"none", cursor:"pointer",
+              fontSize:13, fontWeight:range===b.id?800:500, fontFamily:F,
+              background:range===b.id ? C.accentMid : C.cardAlt,
+              color:range===b.id ? "#fff" : C.muted,
+              transition:"all 0.15s",
+            }}>{b.label}</button>
           ))}
+          {range === "custom" && (
+            <select value={customYear} onChange={e=>setCustomYear(+e.target.value)} style={{
+              padding:"6px 12px", borderRadius:8, border:`1px solid ${C.border}`,
+              fontSize:13, fontFamily:F, background:C.card, color:C.text,
+            }}>
+              {yearOptions.map(y=><option key={y} value={y}>{y} 年</option>)}
+            </select>
+          )}
+          <span style={{ fontSize:11, color:C.muted, fontFamily:F, marginLeft:4 }}>
+            共 {filteredTasks.length} 件任務
+          </span>
         </div>
       </div>
 
       {/* ── 會議效能 ── */}
-      {view === "meeting" && <MeetingStats tasks={tasks} meetings={meetings} monthly={monthly} />}
+      {view === "meeting" && <MeetingStats tasks={filteredTasks} meetings={meetings} monthly={monthly} range={range} />}
 
       {/* ── 個人貢獻 ── */}
-      {view === "person" && <PersonStats tasks={tasks} members={members} />}
+      {view === "person" && <PersonStats tasks={filteredTasks} members={members} />}
 
       {/* ── 單位效率 ── */}
-      {view === "unit" && <UnitStats tasks={tasks} unitLoads={unitLoads} />}
+      {view === "unit" && <UnitStats tasks={filteredTasks} unitLoads={unitLoads} />}
 
       <style>{`
         @media (max-width: 768px) {

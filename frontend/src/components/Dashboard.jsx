@@ -232,10 +232,10 @@ export default function Dashboard({ stats, tasks, unitLoads, members, monthly, s
         </Card>
 
         <Card>
-          <SectionLabel>個人負荷排行</SectionLabel>
+          <SectionLabel>個人負荷排行（前10）</SectionLabel>
           {members.length===0
             ? <div style={{ color:C.muted, fontSize:14, fontFamily:F, padding:"20px 0", textAlign:"center" }}>尚無人員資料</div>
-            : [...members].sort((a,b)=>b.load-a.load).map((m,i)=>(
+            : [...members].sort((a,b)=>b.load-a.load).slice(0,10).map((m,i)=>(
                 <div key={i} style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14 }}>
                   <span style={{ fontSize:15, fontWeight:900, color:C.border, width:20, fontFamily:F, textAlign:"center" }}>{i+1}</span>
                   <Avatar name={m.name} size={34}/>
