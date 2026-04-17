@@ -16,6 +16,7 @@ export const api = {
   createMeeting: (d)         => r("POST",   "/meetings", d),
   deleteMeeting: (id)        => r("DELETE", `/meetings/${id}`),
   updateMeeting: (id, d)     => r("PATCH",  `/meetings/${id}`, d),
+  allAgendas:    ()          => r("GET",    "/agendas"),
   notifyRun:     ()          => r("POST",   "/notify/run"),
   createAgenda:  (d)         => r("POST",   "/agendas", d),
   updateAgenda:  (id, d)     => r("PATCH",  `/agendas/${id}`, d),

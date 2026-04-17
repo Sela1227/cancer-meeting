@@ -375,6 +375,12 @@ export default function Tasks({ tasks, units, members, meetings, reload }) {
             <Select value={form.assistant_id} onChange={v=>set("assistant_id")(v?+v:null)}
               options={members.map(m=>({value:m.id,label:`${m.name}（${m.unit_name||""}）`}))}/>
           </Field>
+          <Field label="所屬議題">
+            <Select value={form.agenda_id} onChange={v=>set("agenda_id")(v?+v:null)}
+              options={meetings.flatMap(m=>
+                (m.agendas||[]).map(a=>({value:a.id,label:`第${m.session_no}次｜${a.order_no}. ${a.title}`}))
+              )}/>
+          </Field>
           <Field label="截止日期"><Input type="date" value={form.due_date} onChange={set("due_date")}/></Field>
           <Field label="優先級">
             <Select value={form.priority} onChange={set("priority")} options={PRIORITIES}/>

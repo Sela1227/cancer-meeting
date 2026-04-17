@@ -241,11 +241,16 @@ export default function App() {
 
   const load = useCallback(async () => {
     try {
-      const [stats,tasks,units,members,meetings,unitLoads,monthly] = await Promise.all([
+      const [stats,tasks,units,members,meetings,unitLoads,monthly,agendas] = await Promise.all([
         api.stats(), api.tasks(), api.units(), api.members(),
-        api.meetings(), api.unitLoads(), api.monthly(),
+        api.meetings(), api.unitLoads(), api.monthly(), api.allAgendas(),
       ]);
-      setData({ stats,tasks,units,members,meetings,unitLoads,monthly });
+      // 把 agendas 掛到對應的 meeting 上，方便各頁取用
+      const meetingsWithAgendas = meetings.map(m => ({
+        ...m,
+        agendas: agendas.filter(a => a.meeting_id === m.id).sort((a,b)=>a.order_no-b.order_no)
+      }));
+      setData({ stats,tasks,units,members,meetings:meetingsWithAgendas,unitLoads,monthly });
     } catch(e) { }
     finally { setLoading(false); }
   }, []);

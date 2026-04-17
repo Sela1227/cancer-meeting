@@ -725,12 +725,14 @@ def export_backup(db: Session = Depends(get_db)):
     members  = db.query(Member).all()
     tasks    = db.query(Task).all()
     comments = db.query(Comment).all()
+    agendas  = db.query(Agenda).all()
 
     data = {
-        "version": "1.0",
+        "version": "2.0",
         "exported_at": str(date.today()),
         "meetings": [{"id":m.id,"title":m.title,"date":str(m.date),"session_no":m.session_no} for m in meetings],
-        "units":    [{"id":u.id,"name":u.name,"headcount":u.headcount,"available":u.available,"note":u.note} for u in units],
+        "agendas":  [{"id":a.id,"meeting_id":a.meeting_id,"title":a.title,"order_no":a.order_no,"note":a.note} for a in agendas],
+        "units":    [{"id":u.id,"name":u.name,"headcount":u.headcount,"available":u.available,"note":u.note,"campus":u.campus or ""} for u in units],
         "members":  [{"id":m.id,"name":m.name,"email":m.email,"unit_id":m.unit_id,
                       "seniority":m.seniority,"role_type":m.role_type} for m in members],
         "tasks":    [{"id":t.id,"title":t.title,"description":t.description,
@@ -743,7 +745,9 @@ def export_backup(db: Session = Depends(get_db)):
                       "manpower_needed":t.manpower_needed,
                       "manpower_current":t.manpower_current,
                       "progress_pct":t.progress_pct or 0,
-                      "progress_note":t.progress_note or ""} for t in tasks],
+                      "progress_note":t.progress_note or "",
+                      "depends_on_id":t.depends_on_id,
+                      "agenda_id":t.agenda_id} for t in tasks],
         "comments": [{"id":c.id,"task_id":c.task_id,"author_id":c.author_id,
                       "content":c.content,"created_at":str(c.created_at)} for c in comments],
     }
@@ -832,6 +836,7 @@ async def import_backup(file: UploadFile = File(...), db: Session = Depends(get_
         db.query(Comment).delete()
         db.query(Task).delete()
         db.query(Member).delete()
+        db.query(Agenda).delete()
         db.query(Unit).delete()
         db.query(Meeting).delete()
         db.commit()
@@ -843,9 +848,18 @@ async def import_backup(file: UploadFile = File(...), db: Session = Depends(get_
                           date=datetime.strptime(m["date"], "%Y-%m-%d").date())
             db.add(obj); db.flush(); meet_map[m["id"]] = obj.id
 
+        agenda_map = {}
+        for a in data.get("agendas", []):
+            new_mid = meet_map.get(a.get("meeting_id"))
+            if not new_mid: continue
+            obj = Agenda(meeting_id=new_mid, title=a["title"],
+                         order_no=a.get("order_no",1), note=a.get("note",""))
+            db.add(obj); db.flush(); agenda_map[a["id"]] = obj.id
+
         for u in data.get("units", []):
             obj = Unit(name=u["name"], headcount=u.get("headcount",0),
-                       available=u.get("available",0), note=u.get("note",""))
+                       available=u.get("available",0), note=u.get("note",""),
+                       campus=u.get("campus",""))
             db.add(obj); db.flush(); unit_map[u["id"]] = obj.id
 
         for m in data.get("members", []):
@@ -865,6 +879,7 @@ async def import_backup(file: UploadFile = File(...), db: Session = Depends(get_
                 unit_id=unit_map.get(t.get("unit_id")),
                 owner_id=mem_map.get(t.get("owner_id")),
                 assistant_id=mem_map.get(t.get("assistant_id")),
+                agenda_id=agenda_map.get(t.get("agenda_id")),
                 due_date=due,
                 priority=priority_map.get(t.get("priority"), PriorityEnum.medium),
                 status=status_map.get(t.get("status"), StatusEnum.not_started),
@@ -1014,6 +1029,7 @@ def _seed_demo(db):
     db.query(Comment).delete()
     db.query(Task).delete()
     db.query(Member).delete()
+    db.query(Agenda).delete()
     db.query(Unit).delete()
     db.query(Meeting).delete()
     db.commit()
@@ -1025,6 +1041,20 @@ def _seed_demo(db):
         obj = Meeting(title=m["title"], session_no=m["session_no"],
                       date=today + timedelta(days=m["date_offset"]))
         db.add(obj); db.flush(); meetings.append(obj)
+
+    # 議程 Demo
+    DEMO_AGENDAS = [
+        {"meeting": 0, "order_no": 1, "title": "各癌別品質認證推動進度報告", "note": ""},
+        {"meeting": 0, "order_no": 2, "title": "人力盤點與跨單位協調事項",   "note": ""},
+        {"meeting": 0, "order_no": 3, "title": "下次會議預告與臨時動議",     "note": ""},
+        {"meeting": 1, "order_no": 1, "title": "健康台灣深耕計畫執行檢討",   "note": ""},
+        {"meeting": 1, "order_no": 2, "title": "各單位業務進度報告",         "note": ""},
+    ]
+    agendas = []
+    for a in DEMO_AGENDAS:
+        obj = Agenda(meeting_id=meetings[a["meeting"]].id, order_no=a["order_no"],
+                     title=a["title"], note=a["note"])
+        db.add(obj); db.flush(); agendas.append(obj)
 
     units = []
     for u in DEMO_UNITS:
@@ -1052,7 +1082,9 @@ def _seed_demo(db):
     status_map = {"完成": StatusEnum.done, "進行中": StatusEnum.in_progress,
                   "卡關": StatusEnum.blocked, "未開始": StatusEnum.not_started}
     priority_map = {"高": PriorityEnum.high, "中": PriorityEnum.medium, "低": PriorityEnum.low}
-    for t in DEMO_TASKS:
+    for i, t in enumerate(DEMO_TASKS):
+        # 前三個任務掛到第一次會議的議程
+        agenda_id = agendas[min(i, 2)].id if i < 3 else None
         obj = Task(
             title=t["title"], meeting_id=meetings[t["meeting"]].id,
             unit_id=units[t["unit"]].id, owner_id=members[t["owner"]].id,
@@ -1060,6 +1092,7 @@ def _seed_demo(db):
             priority=priority_map[t["priority"]], status=status_map[t["status"]],
             blocked_reason=t["blocked_reason"],
             manpower_needed=t["manpower_needed"], manpower_current=t["manpower_current"],
+            agenda_id=agenda_id,
         )
         db.add(obj); db.flush(); tasks.append(obj)
 
@@ -1080,6 +1113,7 @@ def clear_demo(db: Session = Depends(get_db)):
     db.query(Comment).delete()
     db.query(Task).delete()
     db.query(Member).delete()
+    db.query(Agenda).delete()
     db.query(Unit).delete()
     db.query(Meeting).delete()
     db.commit()

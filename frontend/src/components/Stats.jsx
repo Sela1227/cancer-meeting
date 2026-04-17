@@ -314,7 +314,7 @@ function MeetingStats({ tasks, meetings, monthly }) {
 // ── 個人貢獻 ──────────────────────────────────────────────────────────────────
 function PersonStats({ tasks, members }) {
   const memberData = [...members].map(m => {
-    const myTasks   = tasks.filter(t => t.owner_id === m.id);
+    const myTasks   = filteredTasks.filter(t => t.owner_id === m.id);
     const done      = myTasks.filter(t => t.status === "完成").length;
     const overdue   = myTasks.filter(t => t.overdue).length;
     const high      = myTasks.filter(t => t.priority === "高").length;
@@ -418,7 +418,7 @@ function PersonStats({ tasks, members }) {
 // ── 單位效率 ──────────────────────────────────────────────────────────────────
 function UnitStats({ tasks, unitLoads }) {
   const unitData = unitLoads.map(u => {
-    const ut       = tasks.filter(t => t.unit_id === u.id);
+    const ut       = filteredTasks.filter(t => t.unit_id === u.id);
     const done     = ut.filter(t => t.status === "完成").length;
     const overdue  = ut.filter(t => t.overdue).length;
     const blocked  = ut.filter(t => t.status === "卡關").length;

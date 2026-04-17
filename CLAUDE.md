@@ -8,7 +8,7 @@
 
 癌症醫院會議任務追蹤系統。將每次會議決議轉化為可追蹤任務，管理各單位與個人負荷，支援任務相依性、進度回報、逾期 Email 提醒、PDF 週報產出。
 
-- **目前版本：V1.9.1**
+- **目前版本：V2.0.0**
 - **部署平台：** Railway（單一 Service，FastAPI + React 合一）
 - **資料庫：** Railway PostgreSQL plugin
 
@@ -106,6 +106,11 @@ SQLAlchemy `create_all` 不修改現有表，新欄位必須手動 ALTER。**注
 | progress_pct / progress_note | 進度百分比 / 說明（0-100） |
 | depends_on_id | 前置任務 FK（self-ref） |
 
+### Agenda 欄位
+| 欄位 | 說明 |
+|------|------|
+| meeting_id / title / order_no / note | 基本 |
+
 ### Unit 欄位
 | 欄位 | 說明 |
 |------|------|
@@ -124,6 +129,10 @@ SQLAlchemy `create_all` 不修改現有表，新欄位必須手動 ALTER。**注
 | GET | /api/report/weekly | 週報 PDF |
 | POST | /api/notify/run | 手動觸發 Email 提醒 |
 | GET/POST | /api/meetings | 會議列表/新增 |
+| GET | /api/meetings/{id}/detail | 會議詳情（議程+任務+統計） |
+| GET/POST | /api/agendas | 議程列表/新增 |
+| PATCH/DELETE | /api/agendas/{id} | 編輯/刪除議程 |
+| PATCH | /api/tasks/batch | 批次修改任務（status/priority/owner/due_date） |
 | PATCH/DELETE | /api/meetings/{id} | 編輯/刪除會議 |
 | GET/POST | /api/units | 單位列表/新增 |
 | PATCH | /api/units/{id} | 更新單位（含 campus） |
@@ -165,6 +174,8 @@ SQLAlchemy `create_all` 不修改現有表，新欄位必須手動 ALTER。**注
 
 | 版本 | 關鍵變更 |
 |------|---------|
+| V2.0.0 | 議程管理、歷次會議決議查詢、任務批次操作、備份含 Agenda |
+| V1.9.2 | 深色模式修正、院別補完（Members/Stats）、CLAUDE.md 更新 |
 | V1.9.1 | PDF story 縮排 bug、depends_on migration 簡化 |
 | V1.9.0 | 任務相依性（depends_on）、深色模式、院別篩選擴充 |
 | V1.8.0 | 院別篩選（任務頁）、PDF 進度欄、深色模式按鈕 |
