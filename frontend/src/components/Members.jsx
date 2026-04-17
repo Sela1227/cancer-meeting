@@ -93,11 +93,18 @@ export default function Members({ members, units, reload }) {
           const totalTasks  = unitMembers.reduce((a,m)=>a+m.task_count,0);
           const loadColor   = avgLoad>=80 ? C.danger : avgLoad>=60 ? C.warn : C.accent;
           return (
-            <Card key={i} style={{ borderLeft:`5px solid ${loadColor}`, padding:"20px" }}>
+            <Card key={i} style={{ padding:"20px 20px 20px 24px", position:"relative", overflow:"hidden" }}>
+              <div style={{ position:"absolute", left:0, top:0, bottom:0, width:4, background:loadColor }}/>
               {/* 單位標題列 */}
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12, flexWrap:"wrap", gap:8 }}>
                 <div>
-                  <div style={{ fontSize:18, fontWeight:900, color:C.text, fontFamily:F }}>{u.name}</div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ fontSize:18, fontWeight:900, color:C.text, fontFamily:F }}>{u.name}</div>
+                    {u.campus && <span style={{ fontSize:11, fontWeight:700, padding:"2px 8px", borderRadius:999,
+                      background:u.campus==="彰秀"?C.blueLight:u.campus==="彰濱"?C.accentLight:C.cardAlt,
+                      color:u.campus==="彰秀"?C.blue:u.campus==="彰濱"?C.accentMid:C.muted,
+                      fontFamily:F }}>{u.campus}</span>}
+                  </div>
                   {u.note && <div style={{ fontSize:12, color:C.warn, fontFamily:F, marginTop:2 }}>{u.note}</div>}
                 </div>
                 <div style={{ display:"flex", gap:12, alignItems:"center" }}>
@@ -162,7 +169,8 @@ export default function Members({ members, units, reload }) {
 
       {/* 未分配人員 */}
       {unassigned.length > 0 && (
-        <Card style={{ borderLeft:`5px solid ${C.border}` }}>
+        <Card style={{ padding:"20px 20px 20px 24px", position:"relative", overflow:"hidden" }}>
+          <div style={{ position:"absolute", left:0, top:0, bottom:0, width:4, background:C.border }}/>
           <div style={{ fontSize:15, fontWeight:800, color:C.muted, fontFamily:F, marginBottom:10 }}>未分配單位</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:8 }}>
             {unassigned.map((m,i) => (
@@ -208,6 +216,16 @@ export default function Members({ members, units, reload }) {
           <Field label="編制人數"><Input type="number" value={unitForm.headcount} onChange={v => setU("headcount")(+v)} placeholder="0"/></Field>
           <Field label="可用人力"><Input type="number" value={unitForm.available} onChange={v => setU("available")(+v)} placeholder="0"/></Field>
           <Field label="備註說明"><Input value={unitForm.note} onChange={setU("note")} placeholder="如：人員外借、值班限制等"/></Field>
+          <Field label="院區">
+            <select value={unitForm.campus||""} onChange={e=>setU("campus")(e.target.value)}
+              style={{ width:"100%", padding:"10px 14px", borderRadius:8, border:`1px solid ${C.border}`,
+                fontSize:15, fontFamily:F, background:C.card, color:C.text }}>
+              <option value="">-- 請選擇 --</option>
+              <option value="彰秀">彰秀</option>
+              <option value="彰濱">彰濱</option>
+              <option value="兩院">兩院共用</option>
+            </select>
+          </Field>
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <Btn onClick={saveUnit} style={{ flex: 1 }}>{saving ? "儲存中..." : "儲存"}</Btn>
             <Btn variant="secondary" onClick={() => setModal(null)} style={{ flex: 1 }}>取消</Btn>

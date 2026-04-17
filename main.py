@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import func, extract
+from sqlalchemy import func, extract, text
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import Optional, List
@@ -11,15 +11,47 @@ from pydantic import BaseModel
 import os
 
 from database import engine, get_db, Base, SessionLocal
-from models import Meeting, Unit, Member, Task, Comment, PriorityEnum, StatusEnum
+from models import Meeting, Unit, Member, Task, Comment, Agenda, PriorityEnum, StatusEnum
 from scheduler import start_scheduler
 
 # ── Startup ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    # ── 欄位 migration（舊資料庫補新欄位）────────────────────────────────────
     db = SessionLocal()
     try:
+        # tasks 表新欄位
+        for col, definition in [
+            ("progress_pct",  "INTEGER DEFAULT 0"),
+            ("progress_note", "TEXT DEFAULT ''"),
+            ("depends_on_id", "INTEGER"),
+        ]:
+            try:
+                db.execute(text(f"ALTER TABLE tasks ADD COLUMN {col} {definition}"))
+                db.commit()
+            except Exception:
+                db.rollback()
+        # agendas table
+        try:
+            db.execute(text("CREATE TABLE IF NOT EXISTS agendas (id SERIAL PRIMARY KEY, meeting_id INTEGER REFERENCES meetings(id) ON DELETE CASCADE, title VARCHAR(200) NOT NULL, order_no INTEGER DEFAULT 1, note TEXT DEFAULT '', created_at TIMESTAMPTZ DEFAULT NOW())"))
+            db.commit()
+        except Exception: db.rollback()
+        # tasks 表新欄位（agenda_id）
+        try:
+            db.execute(text("ALTER TABLE tasks ADD COLUMN agenda_id INTEGER REFERENCES agendas(id) ON DELETE SET NULL"))
+            db.commit()
+        except Exception: db.rollback()
+        # units 表新欄位
+        for col, definition in [
+            ("campus", "VARCHAR(20) DEFAULT ''"),
+        ]:
+            try:
+                db.execute(text(f"ALTER TABLE units ADD COLUMN {col} {definition}"))
+                db.commit()
+            except Exception:
+                db.rollback()
+        # 首次啟動若 DB 空則預載 Demo
         if db.query(Task).count() == 0 and db.query(Unit).count() == 0:
             _seed_demo(db)
     finally:
@@ -35,7 +67,7 @@ class MeetingIn(BaseModel):
     title: str; date: date; session_no: int
 
 class UnitIn(BaseModel):
-    name: str; headcount: int = 0; available: int = 0; note: str = ""
+    name: str; headcount: int = 0; available: int = 0; note: str = ""; campus: str = ""
 
 class MemberIn(BaseModel):
     name: str; email: Optional[str] = None; unit_id: Optional[int] = None
@@ -49,6 +81,9 @@ class TaskIn(BaseModel):
     priority: PriorityEnum = PriorityEnum.medium
     status: StatusEnum = StatusEnum.not_started
     blocked_reason: str = ""; manpower_needed: int = 0; manpower_current: int = 0
+    progress_pct: int = 0; progress_note: str = ""
+    depends_on_id: Optional[int] = None
+    agenda_id: Optional[int] = None
 
 class TaskPatch(BaseModel):
     title: Optional[str] = None; description: Optional[str] = None
@@ -57,6 +92,12 @@ class TaskPatch(BaseModel):
     priority: Optional[PriorityEnum] = None; status: Optional[StatusEnum] = None
     blocked_reason: Optional[str] = None
     manpower_needed: Optional[int] = None; manpower_current: Optional[int] = None
+    progress_pct: Optional[int] = None; progress_note: Optional[str] = None
+    depends_on_id: Optional[int] = None
+    agenda_id: Optional[int] = None
+
+class AgendaIn(BaseModel):
+    meeting_id: int; title: str; order_no: int = 1; note: str = ""
 
 class CommentIn(BaseModel):
     content: str; author_id: Optional[int] = None
@@ -67,10 +108,13 @@ def is_overdue(task: Task) -> bool:
 
 def member_dict(m: Member, db: Session) -> dict:
     tasks = db.query(Task).filter(Task.owner_id == m.id).all()
-    total = len(tasks)
+    total     = len(tasks)
     completed = sum(1 for t in tasks if t.status == StatusEnum.done)
     overdue   = sum(1 for t in tasks if is_overdue(t))
-    load = min(100, total * 8 + overdue * 15)
+    active    = [t for t in tasks if t.status != StatusEnum.done]
+    # 負荷 = 目前負責中任務的人力需求總和（manpower_needed 為此任務佔用的人力單位）
+    manpower_demand = sum(t.manpower_needed or 1 for t in active)
+    load = min(100, manpower_demand * 20 + overdue * 10)
     return {
         "id": m.id, "name": m.name, "email": m.email,
         "unit_id": m.unit_id, "seniority": m.seniority, "role_type": m.role_type,
@@ -88,10 +132,17 @@ def task_dict(t: Task) -> dict:
         "blocked_reason": t.blocked_reason,
         "manpower_needed": t.manpower_needed,
         "manpower_current": t.manpower_current,
+        "progress_pct": t.progress_pct or 0,
+        "progress_note": t.progress_note or "",
         "created_at": str(t.created_at),
         "owner_name": t.owner.name if t.owner else None,
         "unit_name": t.unit.name if t.unit else None,
         "meeting_label": f"第{t.meeting.session_no}次" if t.meeting else None,
+        "agenda_id":        t.agenda_id,
+        "agenda_title":     t.agenda.title if t.agenda else None,
+        "depends_on_id":    t.depends_on_id,
+        "depends_on_title": t.depends_on.title if t.depends_on else None,
+        "depends_on_done":  t.depends_on.status == StatusEnum.done if t.depends_on else True,
         "overdue": is_overdue(t),
     }
 
@@ -109,6 +160,75 @@ def delete_meeting(mid: int, db: Session = Depends(get_db)):
     m = db.query(Meeting).filter(Meeting.id == mid).first()
     if not m: raise HTTPException(404)
     db.delete(m); db.commit(); return {"ok": True}
+
+@app.patch("/api/meetings/{mid}")
+def update_meeting(mid: int, data: MeetingIn, db: Session = Depends(get_db)):
+    m = db.query(Meeting).filter(Meeting.id == mid).first()
+    if not m: raise HTTPException(404)
+    for k, v in data.model_dump().items(): setattr(m, k, v)
+    db.commit(); db.refresh(m); return m
+
+# ── Agendas ──────────────────────────────────────────────────────────────────
+@app.get("/api/agendas")
+def list_agendas(meeting_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(Agenda)
+    if meeting_id: q = q.filter(Agenda.meeting_id == meeting_id)
+    return q.order_by(Agenda.meeting_id, Agenda.order_no).all()
+
+@app.post("/api/agendas")
+def create_agenda(data: AgendaIn, db: Session = Depends(get_db)):
+    a = Agenda(**data.model_dump()); db.add(a); db.commit(); db.refresh(a); return a
+
+@app.patch("/api/agendas/{aid}")
+def update_agenda(aid: int, data: AgendaIn, db: Session = Depends(get_db)):
+    a = db.query(Agenda).filter(Agenda.id == aid).first()
+    if not a: raise HTTPException(404)
+    for k, v in data.model_dump().items(): setattr(a, k, v)
+    db.commit(); db.refresh(a); return a
+
+@app.delete("/api/agendas/{aid}")
+def delete_agenda(aid: int, db: Session = Depends(get_db)):
+    a = db.query(Agenda).filter(Agenda.id == aid).first()
+    if not a: raise HTTPException(404)
+    db.delete(a); db.commit(); return {"ok": True}
+
+# ── Meeting detail（含議程+任務）──────────────────────────────────────────────
+@app.get("/api/meetings/{mid}/detail")
+def meeting_detail(mid: int, db: Session = Depends(get_db)):
+    m = db.query(Meeting).filter(Meeting.id == mid).first()
+    if not m: raise HTTPException(404)
+    agendas = db.query(Agenda).filter(Agenda.meeting_id == mid).order_by(Agenda.order_no).all()
+    tasks   = db.query(Task).filter(Task.meeting_id == mid).all()
+    total   = len(tasks)
+    done    = sum(1 for t in tasks if t.status == StatusEnum.done)
+    overdue = sum(1 for t in tasks if is_overdue(t))
+    return {
+        "id": m.id, "title": m.title, "date": str(m.date), "session_no": m.session_no,
+        "task_count": total, "done_count": done, "overdue_count": overdue,
+        "completion_rate": int(done/total*100) if total else 0,
+        "agendas": [{"id":a.id,"title":a.title,"order_no":a.order_no,"note":a.note} for a in agendas],
+        "tasks": [task_dict(t) for t in tasks],
+    }
+
+# ── Batch task update ─────────────────────────────────────────────────────────
+class BatchPatch(BaseModel):
+    ids: List[int]
+    status: Optional[StatusEnum] = None
+    priority: Optional[PriorityEnum] = None
+    owner_id: Optional[int] = None
+    due_date: Optional[date] = None
+
+@app.patch("/api/tasks/batch")
+def batch_update(data: BatchPatch, db: Session = Depends(get_db)):
+    patch = {k:v for k,v in data.model_dump().items() if k != "ids" and v is not None}
+    updated = 0
+    for tid in data.ids:
+        t = db.query(Task).filter(Task.id == tid).first()
+        if t:
+            for k, v in patch.items(): setattr(t, k, v)
+            updated += 1
+    db.commit()
+    return {"ok": True, "updated": updated}
 
 # ── Units ─────────────────────────────────────────────────────────────────────
 @app.get("/api/units")
@@ -179,8 +299,27 @@ def get_task(tid: int, db: Session = Depends(get_db)):
 def update_task(tid: int, data: TaskPatch, db: Session = Depends(get_db)):
     t = db.query(Task).filter(Task.id == tid).first()
     if not t: raise HTTPException(404)
-    for k, v in data.model_dump(exclude_none=True).items(): setattr(t, k, v)
-    db.commit(); db.refresh(t); return task_dict(t)
+    patch = data.model_dump(exclude_none=True)
+    progress_updated = "progress_pct" in patch or "progress_note" in patch
+    for k, v in patch.items(): setattr(t, k, v)
+    db.commit(); db.refresh(t)
+    # 有回報進度時，通知秘書（ALERT_FROM_EMAIL 對應杜祐儀）
+    if progress_updated and t.owner:
+        from scheduler import send_reminder
+        import os
+        notify_email = os.environ.get("NOTIFY_TO_EMAIL", os.environ.get("ALERT_FROM_EMAIL", ""))
+        if notify_email:
+            send_reminder(
+                notify_email,
+                f"【進度回報】{t.title}",
+                f"{t.owner.name} 回報任務進度：\n\n"
+                f"任務：{t.title}\n"
+                f"進度：{t.progress_pct}%\n"
+                f"說明：{t.progress_note or '（無說明）'}\n"
+                f"目前狀態：{t.status.value}\n\n"
+                f"截止日期：{t.due_date or '未設定'}"
+            )
+    return task_dict(t)
 
 @app.delete("/api/tasks/{tid}")
 def delete_task(tid: int, db: Session = Depends(get_db)):
@@ -236,16 +375,22 @@ def unit_loads(db: Session = Depends(get_db)):
         total     = len(tasks)
         completed = sum(1 for t in tasks if t.status == StatusEnum.done)
         overdue   = sum(1 for t in tasks if is_overdue(t))
-        load      = min(100, total * 8 + overdue * 15)
+        active    = [t for t in tasks if t.status != StatusEnum.done]
         # 人力從實際人員計算
         all_members   = db.query(Member).filter(Member.unit_id == u.id).all()
         headcount     = len(all_members)
         available     = sum(1 for m in all_members if m.role_type == "臨床專責")
+        # 負荷 = 在辦任務人力需求 / 可用人力（以100%為上限）
+        demand = sum(t.manpower_needed or 1 for t in active)
+        if available > 0:
+            load = min(100, int(demand / available * 100))
+        else:
+            load = min(100, total * 10)
         result.append({
             "id": u.id, "name": u.name,
             "headcount": headcount, "available": available,
             "tasks": total, "completed": completed,
-            "overdue": overdue, "load": load, "note": u.note,
+            "overdue": overdue, "load": load, "note": u.note, "campus": u.campus or "",
         })
     return result
 
@@ -268,13 +413,11 @@ def weekly_report(db: Session = Depends(get_db)):
     from reportlab.lib.units import cm
     from reportlab.lib import colors
     from reportlab.platypus import (SimpleDocTemplate, Paragraph, Table,
-                                    TableStyle, Spacer, HRFlowable, KeepTogether)
-    from reportlab.graphics.shapes import Drawing, Rect, String, Line
-    from reportlab.graphics import renderPDF
+                                    TableStyle, Spacer, HRFlowable)
+    from reportlab.graphics.shapes import Drawing, Rect, String, Polygon
 
     _register_fonts()
     CN     = "STSong-Light"
-    CNB    = "STSong-Light"
     BROWN  = colors.HexColor("#6B4226")
     DARK   = colors.HexColor("#2E1F14")
     RED    = colors.HexColor("#8B2E2E")
@@ -287,7 +430,15 @@ def weekly_report(db: Session = Depends(get_db)):
     BLUE   = colors.HexColor("#2D4A8B")
 
     today       = date.today()
-    all_tasks   = db.query(Task).all()
+    try:
+        all_tasks = db.query(Task).all()
+        # 確保新欄位有預設值（舊資料庫欄位可能為 None）
+        for t in all_tasks:
+            if t.progress_pct is None: t.progress_pct = 0
+            if t.progress_note is None: t.progress_note = ""
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(500, f"DB query error: {e}")
     overdue_t   = [t for t in all_tasks if is_overdue(t)]
     inprog_t    = [t for t in all_tasks if t.status == StatusEnum.in_progress]
     blocked_t   = [t for t in all_tasks if t.status == StatusEnum.blocked and not is_overdue(t)]
@@ -303,36 +454,49 @@ def weekly_report(db: Session = Depends(get_db)):
     W = A4[0] - 3.6*cm
 
     def ps(size=10, align=0, color=DARK, bold=False):
-        return ParagraphStyle("s", fontName=CNB if bold else CN,
+        return ParagraphStyle("s", fontName=CN,
             fontSize=size, textColor=color, alignment=align, leading=size*1.5)
 
     def p(txt, size=10, align=0, color=DARK, bold=False):
         return Paragraph(txt, ps(size, align, color, bold))
 
-    CW = [W*0.33, W*0.12, W*0.24, W*0.14, W*0.17]
+    # 任務表格欄位寬
+    CW = [W*0.30, W*0.11, W*0.20, W*0.13, W*0.12, W*0.14]
+
+    def shorten_unit(name, maxlen=12):
+        name = name.replace("（彰秀）","(秀)").replace("（彰濱）","(濱)")
+        return name[:maxlen]+("…" if len(name)>maxlen else "")
 
     def task_table(tasks, show_reason=False):
         header = [p("任務名稱",9,bold=True,color=colors.white),
                   p("主責人", 9,bold=True,color=colors.white),
                   p("主責單位",9,bold=True,color=colors.white),
                   p("截止日", 9,bold=True,color=colors.white),
+                  p("進度",   9,bold=True,color=colors.white),
                   p("狀態",   9,bold=True,color=colors.white)]
         data = [header]
         red_rows = []
         for i, t in enumerate(tasks, 1):
             label  = "逾期" if is_overdue(t) else t.status.value
-            reason = f"\n※{t.blocked_reason[:28]}" if show_reason and t.blocked_reason else ""
-            uname  = (t.unit.name if t.unit else "—").replace("（","\n（")
-            sc = RED if is_overdue(t) else (AMBER if t.status==StatusEnum.blocked else DARK)
+            reason = ""
+            if show_reason and t.blocked_reason:
+                br = t.blocked_reason[:28] + ("…" if len(t.blocked_reason)>28 else "")
+                reason = f"\n{br}"
+            uname  = shorten_unit(t.unit.name if t.unit else "—")
+            sc     = RED if is_overdue(t) else (AMBER if t.status==StatusEnum.blocked else DARK)
+            pct    = t.progress_pct or 0
+            pnote  = (t.progress_note or "")[:10]
+            prog   = f"{pct}%" + (f"\n{pnote}" if pnote else "")
+            pc     = GREEN if pct>=80 else (AMBER if pct>=40 else DARK)
             data.append([
-                p(t.title[:22]+("…" if len(t.title)>22 else ""),9),
+                p(t.title[:20]+("…" if len(t.title)>20 else ""),9),
                 p(t.owner.name if t.owner else "—",9),
-                p(uname,8),
+                p(uname,9),
                 p(str(t.due_date) if t.due_date else "—",9),
+                p(prog,8,color=pc),
                 p(label+reason,9,color=sc),
             ])
             if is_overdue(t): red_rows.append(i)
-
         tbl = Table(data, colWidths=CW, repeatRows=1)
         style = [
             ("FONTNAME",(0,0),(-1,-1),CN),
@@ -345,95 +509,85 @@ def weekly_report(db: Session = Depends(get_db)):
             ("BOTTOMPADDING",(0,0),(-1,-1),5),
             ("LEFTPADDING",(0,0),(-1,-1),5),
         ]
-        for r in red_rows:
-            style.append(("BACKGROUND",(0,r),(-1,r),colors.HexColor("#F5E8E8")))
+        for r in red_rows: style.append(("BACKGROUND",(0,r),(-1,r),colors.HexColor("#F5E8E8")))
         tbl.setStyle(TableStyle(style))
         return tbl
 
     def sec(title, color=BROWN):
         return [Spacer(1,0.35*cm), p(f"▌ {title}",12,bold=True,color=color), Spacer(1,0.15*cm)]
 
-    # ── 圖表：任務狀態圓餅 ─────────────────────────────────────────────────────
+    # ── 圓餅圖 ─────────────────────────────────────────────────────────────────
     def status_pie_drawing():
+        import math
         total = len(all_tasks)
-        if total == 0:
-            return None
+        if total == 0: return None
         slices = [
             ("完成",   len(done_t),    GREEN),
             ("進行中", len(inprog_t),  BLUE),
-            ("卡關",   len(blocked_t), AMBER),
             ("逾期",   len(overdue_t), RED),
-            ("未開始", len(all_tasks)-len(done_t)-len(inprog_t)-len(blocked_t)-len(overdue_t), GREY),
+            ("卡關",   len(blocked_t), AMBER),
+            ("未開始", total-len(done_t)-len(inprog_t)-len(overdue_t)-len(blocked_t), GREY),
         ]
         slices = [(l,v,c) for l,v,c in slices if v>0]
-        import math
-        d = Drawing(180,160)
-        cx,cy,r = 80,80,65
+        DW, DH = W, 170
+        d = Drawing(DW, DH)
+        cx, cy, r = 90, 88, 70
         angle = 0
-        for label,val,col in slices:
+        for label, val, col in slices:
             sweep = val/total*360
-            # 繪製扇形（用多邊形近似）
-            pts = [cx,cy]
-            steps = max(int(sweep/3),2)
+            pts = [cx, cy]
+            steps = max(int(sweep/3), 3)
             for k in range(steps+1):
                 a = math.radians(angle + k*sweep/steps)
-                pts += [cx+r*math.cos(a), cy+r*math.sin(a)]
+                pts += [cx + r*math.cos(a), cy + r*math.sin(a)]
             from reportlab.graphics.shapes import Polygon
             d.add(Polygon(pts, fillColor=col, strokeColor=colors.white, strokeWidth=1.5))
-            # 標籤
-            mid_a = math.radians(angle + sweep/2)
-            lx = cx + (r+18)*math.cos(mid_a)
-            ly = cy + (r+18)*math.sin(mid_a)
             pct = int(val/total*100)
-            if pct >= 8:
-                d.add(String(lx,ly,f"{pct}%",fontName=CN,fontSize=8,
-                    fillColor=DARK,textAnchor="middle"))
+            if pct >= 10:
+                mid_a = math.radians(angle + sweep/2)
+                lx = cx + r*0.6*math.cos(mid_a)
+                ly = cy + r*0.6*math.sin(mid_a) - 5
+                d.add(String(lx, ly, f"{pct}%", fontName=CN, fontSize=9,
+                             fillColor=colors.white, textAnchor="middle"))
             angle += sweep
-        # 圖例
-        lx0,ly0 = 155,145
-        for i,(label,val,col) in enumerate(slices):
-            lyi = ly0 - i*14
-            d.add(Rect(lx0,lyi,10,10,fillColor=col,strokeColor=None))
-            d.add(String(lx0+13,lyi+1,f"{label} {val}",fontName=CN,fontSize=8,fillColor=DARK))
+        # 右側圖例
+        leg_x = cx + r + 30
+        for i, (label, val, col) in enumerate(slices):
+            ly = DH - 24 - i*24
+            d.add(Rect(leg_x, ly, 12, 12, fillColor=col, strokeColor=None))
+            d.add(String(leg_x+16, ly+2, f"{label}  {val}", fontName=CN, fontSize=9, fillColor=DARK))
         return d
 
-    # ── 圖表：各單位任務橫條圖 ────────────────────────────────────────────────
+    # ── 橫條圖 ─────────────────────────────────────────────────────────────────
     def unit_bar_drawing(units_data):
-        if not units_data:
-            return None
-        n = len(units_data)
-        dh = max(n*28+40, 100)
-        d = Drawing(W, dh)  # 轉 pt
-        max_v = max((u["total"] for u in units_data), default=1)
-        BAR_W = W - 170
-        for i,u in enumerate(units_data):
-            y = dh - 30 - i*28
-            # 底色軌道
-            d.add(Rect(120,y,BAR_W,16,fillColor=colors.HexColor("#EDE5DC"),strokeColor=None))
-            # 完成 bar
+        if not units_data: return None
+        n   = len(units_data)
+        dh  = max(n*26+30, 80)
+        d   = Drawing(W, dh)
+        max_v  = max((u["total"] for u in units_data), default=1)
+        NAME_W = 135
+        NUM_W  = 32
+        BAR_W  = W - NAME_W - NUM_W - 4
+        for i, u in enumerate(units_data):
+            y = dh - 20 - i*26
+            d.add(Rect(NAME_W, y, BAR_W, 14, fillColor=colors.HexColor("#EDE5DC"), strokeColor=None))
             if u["total"] > 0:
-                done_w   = (u["completed"]/max_v)*BAR_W
-                remain_w = (u["total"]/max_v)*BAR_W - done_w
-                d.add(Rect(120,y,done_w,16,fillColor=GREEN,strokeColor=None))
-                d.add(Rect(120+done_w,y,remain_w,16,fillColor=AMBER,strokeColor=None))
-                if u["overdue"] > 0:
-                    ov_w = (u["overdue"]/max_v)*BAR_W
-                    d.add(Rect(120+done_w+remain_w-ov_w,y,ov_w,16,fillColor=RED,strokeColor=None))
-            # 單位名
-            name = u["name"].replace("（","(").replace("）",")")
-            if len(name)>8: name = name[:8]+"…"
-            d.add(String(115,y+4,name,fontName=CN,fontSize=8,fillColor=DARK,textAnchor="end"))
-            # 數字
-            d.add(String(120+BAR_W+4,y+4,f"{u['total']}件",fontName=CN,fontSize=8,fillColor=DARK))
-        # 圖例
-        gy = 8
-        for col,lab in [(GREEN,"完成"),(AMBER,"進行中"),(RED,"逾期")]:
-            d.add(Rect(120,gy,10,10,fillColor=col,strokeColor=None))
-            d.add(String(133,gy+1,lab,fontName=CN,fontSize=8,fillColor=DARK))
-            gy += 0 ; pass
-        for j,(col,lab) in enumerate([(GREEN,"完成"),(AMBER,"進行中"),(RED,"逾期")]):
-            d.add(Rect(120+j*70,8,10,10,fillColor=col,strokeColor=None))
-            d.add(String(133+j*70,9,lab,fontName=CN,fontSize=8,fillColor=DARK))
+                scale  = BAR_W / max_v
+                done_w = u["completed"] * scale
+                ov_w   = u["overdue"]   * scale
+                act_w  = (u["total"] - u["completed"] - u["overdue"]) * scale
+                d.add(Rect(NAME_W,           y, done_w, 14, fillColor=GREEN, strokeColor=None))
+                d.add(Rect(NAME_W+done_w,    y, act_w,  14, fillColor=AMBER, strokeColor=None))
+                if ov_w > 0:
+                    d.add(Rect(NAME_W+done_w+act_w, y, ov_w, 14, fillColor=RED, strokeColor=None))
+            name = shorten_unit(u["name"], 16)
+            d.add(String(NAME_W-4, y+3, name, fontName=CN, fontSize=8, fillColor=DARK, textAnchor="end"))
+            d.add(String(NAME_W+BAR_W+4, y+3, f"{u['total']}件", fontName=CN, fontSize=8, fillColor=DARK))
+        # 圖例（只畫一次）
+        for j, (col, lab) in enumerate([(GREEN,"完成"),(AMBER,"進行中"),(RED,"逾期")]):
+            gx = NAME_W + j*68
+            d.add(Rect(gx, 2, 10, 10, fillColor=col, strokeColor=None))
+            d.add(String(gx+13, 3, lab, fontName=CN, fontSize=8, fillColor=DARK))
         return d
 
     story = []
@@ -463,7 +617,7 @@ def weekly_report(db: Session = Depends(get_db)):
           p(str(len(done_t)),26,1,bold=True,color=GREEN)]],
         colWidths=[W/5]*5)
     summary.setStyle(TableStyle([
-        ("FONTNAME",(0,0),(-1,-1),CNB),
+        ("FONTNAME",(0,0),(-1,-1),CN),
         ("ALIGN",(0,0),(-1,-1),"CENTER"),
         ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
         ("BACKGROUND",(0,0),(-1,0),BG2),
@@ -548,7 +702,11 @@ def weekly_report(db: Session = Depends(get_db)):
         p(f"本報告由彰濱秀傳癌症醫院專案追蹤系統自動產生　{today}",8,align=1,color=GREY),
     ]
 
-    doc.build(story)
+    try:
+        doc.build(story)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(500, f"PDF build error: {e}")
     buf.seek(0)
     filename = f"癌症醫院週報_{today}.pdf"
     return StreamingResponse(buf,media_type="application/pdf",
@@ -583,7 +741,9 @@ def export_backup(db: Session = Depends(get_db)):
                       "status":t.status.value if t.status else None,
                       "blocked_reason":t.blocked_reason,
                       "manpower_needed":t.manpower_needed,
-                      "manpower_current":t.manpower_current} for t in tasks],
+                      "manpower_current":t.manpower_current,
+                      "progress_pct":t.progress_pct or 0,
+                      "progress_note":t.progress_note or ""} for t in tasks],
         "comments": [{"id":c.id,"task_id":c.task_id,"author_id":c.author_id,
                       "content":c.content,"created_at":str(c.created_at)} for c in comments],
     }
@@ -636,6 +796,7 @@ async def import_backup(file: UploadFile = File(...), db: Session = Depends(get_
             db.add(obj); db.flush()
             mem_map[m["id"]] = obj.id
 
+        _dep_map = {}  # old_task_id -> old_depends_on_id
         for t in data.get("tasks", []):
             due = None
             if t.get("due_date") and t["due_date"] != "None":
@@ -710,8 +871,19 @@ async def import_backup(file: UploadFile = File(...), db: Session = Depends(get_
                 blocked_reason=t.get("blocked_reason",""),
                 manpower_needed=t.get("manpower_needed",0),
                 manpower_current=t.get("manpower_current",0),
+                progress_pct=t.get("progress_pct",0),
+                progress_note=t.get("progress_note",""),
             )
-            db.add(obj); db.flush(); task_map[t["id"]] = obj.id
+            db.add(obj); db.flush()
+            task_map[t["id"]] = obj.id
+            _dep_map[t["id"]] = t.get("depends_on_id")
+
+        # 還原相依性（second pass）
+        for old_id, old_dep in _dep_map.items():
+            if old_dep and old_dep in task_map and old_id in task_map:
+                t_obj = db.query(Task).filter(Task.id == task_map[old_id]).first()
+                if t_obj: t_obj.depends_on_id = task_map[old_dep]
+        db.flush()
 
         for c in data.get("comments", []):
             new_task_id = task_map.get(c.get("task_id"))
@@ -757,20 +929,20 @@ if os.path.exists("static"):
 # ── Demo Data ─────────────────────────────────────────────────────────────────
 
 DEMO_UNITS = [
-    {"name":"癌症防治中心（彰秀）","headcount":0,"available":0,"note":"彰秀院區癌症防治業務統籌"},
-    {"name":"癌症防治中心（彰濱）","headcount":0,"available":0,"note":"彰濱院區癌症防治業務統籌"},
-    {"name":"放腫科（彰濱）",      "headcount":0,"available":0,"note":"設備值班限制可用人力"},
-    {"name":"放腫科（彰秀）",      "headcount":0,"available":0,"note":""},
-    {"name":"血液腫瘤科（彰濱）",  "headcount":0,"available":0,"note":""},
-    {"name":"血液腫瘤科（彰秀）",  "headcount":0,"available":0,"note":""},
-    {"name":"一般外科（彰濱）",    "headcount":0,"available":0,"note":""},
-    {"name":"內科（彰秀）",        "headcount":0,"available":0,"note":"住院醫師輪訓中"},
-    {"name":"醫務管理組",          "headcount":0,"available":0,"note":"癌症醫院行政窗口"},
-    {"name":"護理部（彰秀）",      "headcount":0,"available":0,"note":"臨床排班影響可用人力"},
-    {"name":"護理部（彰濱）",      "headcount":0,"available":0,"note":""},
-    {"name":"病理科",              "headcount":0,"available":0,"note":"人員外借院本部"},
-    {"name":"影像科",              "headcount":0,"available":0,"note":""},
-    {"name":"社工科",              "headcount":0,"available":0,"note":""},
+    {"name":"癌症防治中心（彰秀）","headcount":0,"available":0,"note":"彰秀院區癌症防治業務統籌","campus":"彰秀"},
+    {"name":"癌症防治中心（彰濱）","headcount":0,"available":0,"note":"彰濱院區癌症防治業務統籌","campus":"彰濱"},
+    {"name":"放腫科（彰濱）",      "headcount":0,"available":0,"note":"設備值班限制可用人力",     "campus":"彰濱"},
+    {"name":"放腫科（彰秀）",      "headcount":0,"available":0,"note":"",                        "campus":"彰秀"},
+    {"name":"血液腫瘤科（彰濱）",  "headcount":0,"available":0,"note":"",                        "campus":"彰濱"},
+    {"name":"血液腫瘤科（彰秀）",  "headcount":0,"available":0,"note":"",                        "campus":"彰秀"},
+    {"name":"一般外科（彰濱）",    "headcount":0,"available":0,"note":"",                        "campus":"彰濱"},
+    {"name":"內科（彰秀）",        "headcount":0,"available":0,"note":"住院醫師輪訓中",           "campus":"彰秀"},
+    {"name":"醫務管理組",          "headcount":0,"available":0,"note":"癌症醫院行政窗口",         "campus":"兩院"},
+    {"name":"護理部（彰秀）",      "headcount":0,"available":0,"note":"臨床排班影響可用人力",     "campus":"彰秀"},
+    {"name":"護理部（彰濱）",      "headcount":0,"available":0,"note":"",                        "campus":"彰濱"},
+    {"name":"病理科",              "headcount":0,"available":0,"note":"人員外借院本部",           "campus":"兩院"},
+    {"name":"影像科",              "headcount":0,"available":0,"note":"",                        "campus":"兩院"},
+    {"name":"社工科",              "headcount":0,"available":0,"note":"",                        "campus":"兩院"},
 ]
 
 DEMO_MEMBERS = [
@@ -857,7 +1029,8 @@ def _seed_demo(db):
     units = []
     for u in DEMO_UNITS:
         obj = Unit(name=u["name"], headcount=u["headcount"],
-                   available=u["available"], note=u["note"])
+                   available=u["available"], note=u["note"],
+                   campus=u.get("campus",""))
         db.add(obj); db.flush(); units.append(obj)
 
     members = []

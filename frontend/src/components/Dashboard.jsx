@@ -99,7 +99,8 @@ const RadialGauge = ({ load, name, available, headcount, overdue, note }) => {
 };
 
 const StatBox = ({ label, value, color, sub }) => (
-  <div style={{ background:C.cardAlt, borderRadius:14, padding:"18px 16px", borderLeft:`5px solid ${color}` }}>
+  <div style={{ background:C.cardAlt, borderRadius:14, padding:"18px 16px 18px 20px", position:"relative", overflow:"hidden" }}>
+    <div style={{ position:"absolute", left:0, top:0, bottom:0, width:4, background:color }}/>
     <div style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", fontFamily:F, marginBottom:8 }}>{label}</div>
     <div style={{ fontSize:48, fontWeight:900, color, lineHeight:1, fontFamily:F }}>{value}</div>
     {sub && <div style={{ fontSize:12, color:C.muted, marginTop:6, fontFamily:F }}>{sub}</div>}
@@ -109,16 +110,22 @@ const StatBox = ({ label, value, color, sub }) => (
 const TaskRow = ({ task }) => {
   const pc = priorityColor[task.priority]||C.muted;
   const s = statusStyle(task.status, task.overdue);
+  const waiting = task.depends_on_id && !task.depends_on_done;
   return (
     <div style={{ display:"flex", alignItems:"center", gap:14, padding:"14px 16px",
-      background:C.cardAlt, borderRadius:12, marginBottom:8 }}>
-      <div style={{ width:5, height:44, borderRadius:3, background:pc, flexShrink:0 }}/>
+      background:C.cardAlt, borderRadius:12, marginBottom:8, position:"relative", overflow:"hidden" }}>
+      <div style={{ position:"absolute", left:0, top:0, bottom:0, width:4, background:waiting?C.warn:pc, borderRadius:0 }}/>
       <div style={{ flex:1, minWidth:0 }}>
         <div style={{ fontSize:16, fontWeight:700, color:C.text, fontFamily:F,
           overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{task.title}</div>
         <div style={{ fontSize:12, color:C.muted, fontFamily:F, marginTop:3 }}>
           {task.owner_name||"未指定"} · {task.unit_name||""} · {task.due_date||"無截止日"}
         </div>
+        {waiting && (
+          <div style={{ fontSize:11, color:C.warn, fontFamily:F, marginTop:2 }}>
+            ⏳ 等待：{task.depends_on_title}
+          </div>
+        )}
       </div>
       <Badge status={task.status} overdue={task.overdue}/>
     </div>

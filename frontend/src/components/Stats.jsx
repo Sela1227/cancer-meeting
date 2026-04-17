@@ -55,7 +55,8 @@ const StatNum = ({ value, label, color }) => (
 
 export default function Stats({ tasks, members, meetings, unitLoads, monthly }) {
   const [view, setView]       = useState("meeting");
-  const [range, setRange]     = useState("all");   // all | year | quarter | month | custom
+  const [range, setRange]     = useState("all");
+  const [campus, setCampus]   = useState("all");
   const [customYear, setCustomYear] = useState(new Date().getFullYear());
 
   const tabs = [
@@ -79,6 +80,12 @@ export default function Stats({ tasks, members, meetings, unitLoads, monthly }) 
   const qStart = Math.floor(mo / 3) * 3;
 
   const filteredTasks = tasks.filter(t => {
+    if (campus !== "all") {
+      const u = unitLoads.find(u => u.id === t.unit_id);
+      const uc = u?.campus || "";
+      if (campus === "兩院") { if (uc !== "兩院") return false; }
+      else if (uc !== campus && uc !== "兩院") return false;
+    }
     if (range === "all") return true;
     const d = t.created_at ? new Date(t.created_at) : null;
     if (!d) return range === "all";
@@ -121,6 +128,16 @@ export default function Stats({ tasks, members, meetings, unitLoads, monthly }) 
 
         {/* 時間區間列 */}
         <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+          <span style={{ fontSize:12, color:C.muted, fontFamily:F, fontWeight:600 }}>院區：</span>
+          {[{k:"all",l:"全部"},{k:"彰秀",l:"彰秀"},{k:"彰濱",l:"彰濱"},{k:"兩院",l:"兩院"}].map(b=>(
+            <button key={b.k} onClick={()=>setCampus(b.k)} style={{
+              padding:"4px 12px", borderRadius:999, border:"none", cursor:"pointer",
+              fontSize:12, fontWeight:campus===b.k?800:400, fontFamily:F,
+              background:campus===b.k?C.accentMid:C.cardAlt,
+              color:campus===b.k?"#fff":C.muted,
+            }}>{b.l}</button>
+          ))}
+          <span style={{ color:C.border, margin:"0 4px" }}>|</span>
           <span style={{ fontSize:12, color:C.muted, fontFamily:F, fontWeight:600 }}>時間區間：</span>
           {rangeBtns.map(b => (
             <button key={b.id} onClick={()=>setRange(b.id)} style={{
@@ -363,8 +380,10 @@ function PersonStats({ tasks, members }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }} className="person-grid">
         {memberData.map((m, i) => (
           <Card key={i} style={{
-            borderLeft: `5px solid ${m.rate >= 70 ? C.blue : m.rate >= 40 ? C.accentMid : m.myTotal === 0 ? C.border : C.danger}`
+            padding: "16px 16px 16px 20px", position:"relative", overflow:"hidden"
           }}>
+            <div style={{ position:"absolute", left:0, top:0, bottom:0, width:4,
+              background: m.rate>=70 ? C.blue : m.rate>=40 ? C.accentMid : m.myTotal===0 ? C.border : C.danger }}/>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
               <Avatar name={m.name} size={44} />
               <div style={{ flex: 1 }}>
@@ -499,18 +518,3 @@ function UnitStats({ tasks, unitLoads }) {
   );
 }
 
-// 手機版 CSS
-const mobileStyle = `
-  @media (max-width: 768px) {
-    .stats-r1 { grid-template-columns: repeat(2,1fr) !important; }
-    .stats-tabs { flex-direction: column !important; align-items: stretch !important; }
-    .stats-tabs > div { justify-content: center; }
-    .person-grid { grid-template-columns: 1fr !important; }
-    .unit-compare { grid-template-columns: 1fr !important; }
-    table { font-size: 12px !important; }
-    table th, table td { padding: 6px 8px !important; }
-  }
-  @media (max-width: 480px) {
-    .stats-r1 { grid-template-columns: 1fr 1fr !important; }
-  }
-`;

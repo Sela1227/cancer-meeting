@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import React from "react";
 import { api } from "./api.js";
-import { C, F } from "./theme.js";
+import { C, F, setTheme, isDark } from "./theme.js";
 import { VERSION } from "./lib/version.js";
 import Dashboard from "./components/Dashboard.jsx";
 import Tasks from "./components/Tasks.jsx";
@@ -173,6 +173,22 @@ const SettingsModal = ({ onClose, onReload }) => {
             style={{ display:"none" }} />
         </Section>
 
+        {/* 手動通知 */}
+        <Section title="立即發送提醒">
+          <div style={{ fontSize:12, color:C.muted, fontFamily:F, marginBottom:12, lineHeight:1.6 }}>
+            立即對所有逾期與即將到期任務的主責人發送 Email 提醒，不等每日排程。
+          </div>
+          <Btn2 onClick={async ()=>{
+            setLoading("notify");
+            try {
+              const d = await api.notifyRun();
+              showMsg(d.message||"提醒已發送");
+            } catch(e) { showMsg("發送失敗："+String(e),"error"); }
+            finally { setLoading(""); }
+          }} disabled={!!loading} variant="outline">
+            {loading==="notify" ? "發送中..." : "🔔 立即發送提醒"}
+          </Btn2>
+        </Section>
         {/* Demo 資料 */}
         <Section title="Demo 資料">
           <div style={{ fontSize:12, color:C.muted, fontFamily:F, marginBottom:12, lineHeight:1.6 }}>
@@ -221,6 +237,7 @@ export default function App() {
   const [data, setData]     = useState({ stats:null, tasks:[], units:[], members:[], meetings:[], unitLoads:[], monthly:[] });
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState(false);
+  const [dark] = useState(isDark());
 
   const load = useCallback(async () => {
     try {
@@ -229,7 +246,7 @@ export default function App() {
         api.meetings(), api.unitLoads(), api.monthly(),
       ]);
       setData({ stats,tasks,units,members,meetings,unitLoads,monthly });
-    } catch(e) { console.error(e); }
+    } catch(e) { }
     finally { setLoading(false); }
   }, []);
 
@@ -273,9 +290,24 @@ export default function App() {
           ))}
         </nav>
 
-        {/* Version + Settings */}
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        {/* Version + Theme + Settings */}
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <div className="dt-nav" style={{ fontSize:12, opacity:0.55, fontFamily:F }}>{VERSION}</div>
+          <button onClick={()=>setTheme(isDark()?"light":"dark")} title={dark?"切換淺色":"切換深色"} style={{
+            background:"rgba(255,255,255,0.15)", border:"none", cursor:"pointer",
+            color:"#fff", borderRadius:10, padding:"8px 10px",
+            display:"flex", alignItems:"center", transition:"background 0.15s",
+          }}
+            onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.25)"}
+            onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,0.15)"}>
+            <svg width="18" height="18" viewBox="0 0 22 22" fill="none">
+              {dark
+                ? <path d="M11 3a8 8 0 100 16A8 8 0 0011 3zm0 2a6 6 0 010 12V5z" fill="white"/>
+                : <><circle cx="11" cy="11" r="4.5" stroke="white" strokeWidth="1.8"/>
+                    <path d="M11 2v2M11 18v2M2 11h2M18 11h2M4.2 4.2l1.4 1.4M16.4 16.4l1.4 1.4M4.2 17.8l1.4-1.4M16.4 5.6l1.4-1.4" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></>
+              }
+            </svg>
+          </button>
           <button onClick={()=>setSettings(true)} style={{
             background:"rgba(255,255,255,0.15)", border:"none", cursor:"pointer",
             color:"#fff", borderRadius:10, padding:"8px 10px",

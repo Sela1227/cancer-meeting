@@ -23,6 +23,7 @@ class Meeting(Base):
     session_no = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     tasks      = relationship("Task", back_populates="meeting", cascade="all, delete")
+    agendas    = relationship("Agenda", back_populates="meeting", cascade="all, delete")
 
 class Unit(Base):
     __tablename__ = "units"
@@ -31,6 +32,7 @@ class Unit(Base):
     headcount = Column(Integer, default=0)
     available = Column(Integer, default=0)
     note      = Column(Text, default="")
+    campus    = Column(String(20), default="")  # 彰秀 / 彰濱 / 兩院
     members   = relationship("Member", back_populates="unit")
     tasks     = relationship("Task", back_populates="unit")
 
@@ -62,6 +64,10 @@ class Task(Base):
     blocked_reason   = Column(Text, default="")
     manpower_needed  = Column(Integer, default=0)
     manpower_current = Column(Integer, default=0)
+    progress_pct     = Column(Integer, default=0)   # 0-100 進度百分比
+    progress_note    = Column(Text, default="")     # 責任人回報說明
+    agenda_id        = Column(Integer, ForeignKey("agendas.id"), nullable=True)
+    depends_on_id    = Column(Integer, ForeignKey("tasks.id"), nullable=True)  # 前置任務
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
     updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -69,7 +75,9 @@ class Task(Base):
     unit      = relationship("Unit", back_populates="tasks")
     owner     = relationship("Member", foreign_keys=[owner_id], back_populates="owned")
     assistant = relationship("Member", foreign_keys=[assistant_id], back_populates="assisted")
-    comments  = relationship("Comment", back_populates="task", cascade="all, delete")
+    comments   = relationship("Comment", back_populates="task", cascade="all, delete")
+    agenda     = relationship("Agenda", foreign_keys=[agenda_id], back_populates="tasks")
+    depends_on = relationship("Task", foreign_keys=[depends_on_id], remote_side="Task.id")
 
 class Comment(Base):
     __tablename__ = "comments"
@@ -80,3 +88,15 @@ class Comment(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     task       = relationship("Task", back_populates="comments")
     author     = relationship("Member", back_populates="comments")
+
+class Agenda(Base):
+    __tablename__ = "agendas"
+    id          = Column(Integer, primary_key=True)
+    meeting_id  = Column(Integer, ForeignKey("meetings.id"), nullable=False)
+    title       = Column(String(200), nullable=False)
+    order_no    = Column(Integer, default=1)
+    note        = Column(Text, default="")
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
+    meeting = relationship("Meeting", back_populates="agendas")
+    tasks   = relationship("Task", back_populates="agenda", foreign_keys="Task.agenda_id")
